@@ -2,30 +2,16 @@
 
 ## Summary
 
-This release adds formula-aware microgrid configuration initialization for
-reporting data workflows. When API credentials are available, microgrid
-configurations are enriched with formulas from the Assets service; otherwise
-the existing static config loading path is used.
-
-It also adds a dedicated reporting battery-usecase plot, including standardized
-data preparation and support for PV and battery overlays.
+<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
-- `init_microgrid_data()`
-  - now conditionally loads configs with formulas when both `API_KEY` and `API_SECRET` are set.
-  - now supports a file argument in addition to the folder argument.
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-- Refactored asset optimization Plotly code to reduce duplication in layout finalization and battery trace creation.
-- `plot_time_series_battery_usecase()`
-  - added as a dedicated reporting plot for battery-usecase analysis.
-- `create_battery_usecase_df()`
-  - added to prepare standardized input data for the battery-usecase plot.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
-- Fixed asset optimization power-flow charge/discharge fills to be anchored to the consumption baseline while keeping hover values on actual series.
-- Fixed battery power chart fills across missing data by inserting zero boundaries at NaN edges to avoid visual bridging through gaps.
-- Fixed battery charge rendering to align positive charge fill with available power bounds in the asset optimization Plotly chart.
-- Fixed timezone-related datetime usage across notification and solar maintenance helpers by using explicit UTC-aware datetimes for defaults and generated timestamps.
+
+<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
