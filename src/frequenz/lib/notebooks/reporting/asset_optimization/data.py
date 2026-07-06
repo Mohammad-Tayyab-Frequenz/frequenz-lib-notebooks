@@ -155,18 +155,24 @@ async def fetch_data(
     df["battery"] = df.get("battery", 0)
     df["pv"] = df.get("pv", 0)
     df["chp"] = df.get("chp", 0)
+    df["wind"] = df.get("wind", 0)
 
     # We only care about the generation part for this analysis
     df["pv"] = df["pv"].clip(upper=0)
     df["chp"] = df["chp"].clip(upper=0)
+    df["wind"] = df["wind"].clip(upper=0)
 
     # Determine consumption if not present
     if "consumption" not in df.columns:
         cols = df.columns.tolist()
-        if any(ct not in ["grid", "pv", "battery", "chp", "soc"] for ct in cols):
+        if any(
+            ct not in ["grid", "pv", "battery", "chp", "wind", "soc"] for ct in cols
+        ):
             raise ValueError(
                 f"Consumption not found in data and unexpected component types present: {cols}."
             )
-        df["consumption"] = df["grid"] - (df["chp"] + df["pv"] + df["battery"])
+        df["consumption"] = df["grid"] - (
+            df["chp"] + df["pv"] + df["wind"] + df["battery"]
+        )
 
     return df

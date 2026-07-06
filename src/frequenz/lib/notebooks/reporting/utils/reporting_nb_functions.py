@@ -157,7 +157,7 @@ def assemble_component_analysis(
             List of component selectors. Can contain component numbers
             (e.g. ``["#1", "#3"]``) or ``"All"``/``"Alle"`` to include all.
         component_key:
-            Component type key (e.g. ``"pv"``, ``"battery"``, ``"chp"``)
+            Component type key (e.g. ``"pv"``, ``"battery"``, ``"chp"``, ``"wind"``)
             used to check availability inside ``component_types``.
         component_types:
             List of component types present in the Energy Report.
