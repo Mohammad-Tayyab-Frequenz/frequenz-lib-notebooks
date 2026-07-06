@@ -98,7 +98,7 @@ def prepare_power_flow_data(df: pd.DataFrame) -> PowerFlowData:
         df:
             Input DataFrame containing at least the columns
             ``"consumption"``, ``"battery"``, and ``"grid"``.
-            Optional columns such as ``"chp"`` and ``"pv"`` are used if present.
+            Optional columns such as ``"chp"``, ``"wind"`` and ``"pv"`` are used if present.
 
     Returns:
         A structured container including:
@@ -115,9 +115,11 @@ def prepare_power_flow_data(df: pd.DataFrame) -> PowerFlowData:
 
     has_chp = "chp" in d.columns
     has_pv = "pv" in d.columns
+    has_wind = "wind" in d.columns
     chp = d["chp"] if has_chp else pd.Series(0.0, index=cons.index)
     pv = d["pv"].clip(lower=0) if has_pv else pd.Series(0.0, index=cons.index)
-    prod = chp + pv
+    wind = d["wind"].clip(lower=0) if has_wind else pd.Series(0.0, index=cons.index)
+    prod = chp + pv + wind
 
     battery_consumption = None
     charge = None
@@ -170,8 +172,13 @@ def prepare_energy_trade_data(df: pd.DataFrame) -> EnergyTradeData:
 
     has_chp = "chp" in d.columns
     has_pv = "pv" in d.columns
+    has_wind = "wind" in d.columns
     chp = d["chp"] if has_chp else 0 * cons
-    prod = chp + (d["pv"].clip(lower=0) if has_pv else 0)
+    prod = (
+        chp
+        + (d["pv"].clip(lower=0) if has_pv else 0)
+        + (d["wind"].clip(lower=0) if has_wind else 0)
+    )
     trade -= prod
 
     g = trade.resample("15min").mean() / 4

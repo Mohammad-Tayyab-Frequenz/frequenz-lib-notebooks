@@ -286,7 +286,7 @@ def get_energy_report_columns(
     The selected columns depend on the available component types.
 
     Args:
-        component_types: List of component types (e.g. ["pv", "battery"])
+        component_types: List of component types (e.g. ["pv", "wind", "chp", "battery"])
         single_components: Extra component columns to always include.
 
     Returns:
@@ -712,7 +712,7 @@ def fill_aggregated_component_columns(
             (e.g., "battery_power_flow") and labeled individual component columns
             (e.g., "Battery #1", "Battery #2").
         component_types: List of component types to consider for aggregation
-            (e.g., ["battery", "pv"]).
+            (e.g., ["battery", "pv", "chp", "wind"]).
 
         config: Mapping of component types to tuples containing the aggregated
             column name and the prefix used to identify individual component
