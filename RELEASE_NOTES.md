@@ -11,6 +11,7 @@
 ## New Features
 
 - Adding wind data to data fetching.
+- Add day ahead prices fetching.
 
 ## Bug Fixes
 
