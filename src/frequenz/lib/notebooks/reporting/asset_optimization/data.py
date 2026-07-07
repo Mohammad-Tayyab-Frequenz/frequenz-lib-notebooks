@@ -13,8 +13,26 @@ from dotenv import load_dotenv
 from frequenz.gridpool import MicrogridConfig
 
 from frequenz.data.microgrid import MicrogridData
+from frequenz.lib.notebooks.dayahead import fetch_day_ahead_prices
 
 _logger = logging.getLogger(__name__)
+
+
+def _align_series_to_index(index: pd.Index, series: pd.Series) -> pd.Series:
+    """Align a time series to a target datetime index using forward fill."""
+    target_index = pd.DatetimeIndex(index)
+    aligned = series.copy()
+    aligned.index = pd.DatetimeIndex(aligned.index)
+
+    if target_index.tz is not None and aligned.index.tz is None:
+        aligned.index = aligned.index.tz_localize(target_index.tz)
+    elif target_index.tz is None and aligned.index.tz is not None:
+        aligned.index = aligned.index.tz_convert("UTC").tz_localize(None)
+    elif target_index.tz is not None and aligned.index.tz is not None:
+        aligned.index = aligned.index.tz_convert(target_index.tz)
+
+    aligned = aligned.sort_index()
+    return aligned.reindex(target_index, method="ffill")
 
 
 async def init_microgrid_data(
@@ -74,6 +92,50 @@ async def init_microgrid_data(
         sign_secret=api_secret,
         microgrid_configs=mcfg,
     )
+
+
+def merge_day_ahead_prices(
+    df: pd.DataFrame,
+    *,
+    dayahead_api_key: str | None = None,
+    dayahead_country_code: str,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> pd.DataFrame:
+    """Merge ENTSO-E day-ahead prices into an existing battery-usecase dataframe.
+
+    Args:
+        df: Base dataframe to enrich with day-ahead prices.
+        dayahead_api_key: ENTSO-E API key. If not provided, the value is read
+            from the ``ENTSOE_API_KEY`` environment variable.
+        dayahead_country_code: ENTSO-E country code.
+        start_time: Optional explicit start time for the day-ahead query.
+        end_time: Optional explicit end time for the day-ahead query.
+
+    Returns:
+        A copy of ``df`` with a ``day_ahead_price`` column aligned to the dataframe
+        index.
+    """
+    if df.empty:
+        return df.copy()
+
+    start = start_time or pd.Timestamp(df.index.min()).to_pydatetime()
+    end = end_time or pd.Timestamp(df.index.max()).to_pydatetime()
+
+    if start_time is None and len(df.index) > 1:
+        resolution = pd.Timestamp(df.index[1]) - pd.Timestamp(df.index[0])
+        end = (pd.Timestamp(df.index.max()) + resolution).to_pydatetime()
+
+    da_prices = fetch_day_ahead_prices(
+        entsoe_key=dayahead_api_key,
+        start=start,
+        end=end,
+        country_code=dayahead_country_code,
+    )
+
+    merged = df.copy()
+    merged["day_ahead_price"] = _align_series_to_index(merged.index, da_prices)
+    return merged
 
 
 # pylint: disable=too-many-arguments
