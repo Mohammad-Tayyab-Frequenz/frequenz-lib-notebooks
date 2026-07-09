@@ -47,6 +47,7 @@ class BatteryPowerData:
     battery: pd.Series
     charge: pd.Series
     discharge: pd.Series
+    day_ahead_price: pd.Series | None
     max_abs_battery: float
 
 
@@ -227,6 +228,7 @@ def prepare_battery_power_data(df: pd.DataFrame) -> BatteryPowerData:
 
     charge = _masked(df["battery"], df["battery"] > 0)
     discharge = _masked(df["battery"], df["battery"] <= 0)
+    day_ahead_price = df["day_ahead_price"] if "day_ahead_price" in df.columns else None
 
     return BatteryPowerData(
         index=df.index,
@@ -235,6 +237,7 @@ def prepare_battery_power_data(df: pd.DataFrame) -> BatteryPowerData:
         battery=df["battery"],
         charge=charge,
         discharge=discharge,
+        day_ahead_price=day_ahead_price,
         max_abs_battery=max_abs_bat,
     )
 
