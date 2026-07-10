@@ -21,12 +21,21 @@ from .viz_colors import (
     PV,
     SELL,
     SOC,
+    STACK_CHARGE,
+    STACK_CHP,
+    STACK_CONSUMPTION,
+    STACK_DISCHARGE,
+    STACK_GRID,
+    STACK_LINE_WIDTH,
+    STACK_PV,
+    STACK_WIND,
     ZERO_LINE,
 )
 from .viz_data import (
     prepare_battery_power_data,
     prepare_energy_trade_data,
     prepare_monthly_data,
+    prepare_power_data,
     prepare_power_flow_data,
 )
 
@@ -38,6 +47,7 @@ LINE_WIDTH = 1
 FONT_SIZE = 14
 FONT_FAMILY = "Golos Text, sans-serif"
 GRID_LINE_WIDTH = 1
+ZERO_LINE_WIDTH = 2
 HOVER_BG = "rgba(255,255,255,0.95)"
 HOVER_BORDER = "rgba(0,0,0,0.2)"
 HOVER_FONT_COLOR = "#111"
@@ -399,6 +409,239 @@ def plot_power_flow(
         ],
         row=row,
     )
+    return fig
+
+
+def _split_segments(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Return [(start, end), …] for each contiguous True-run in *mask*."""
+    if not mask.any():
+        return []
+    diff = np.diff(mask.astype(int))
+    starts = np.where(diff == 1)[0] + 1
+    ends = np.where(diff == -1)[0]
+    if mask[0]:
+        starts = np.r_[0, starts]
+    if mask[-1]:
+        ends = np.r_[ends, mask.size - 1]
+    return list(zip(starts, ends))
+
+
+def _step_x(x: np.ndarray, start: int, end: int) -> np.ndarray:
+    """Return the doubled x coordinates spanning the hv steps of samples start..end.
+
+    Sample i holds from x[i] to x[i+1], so the run reaches one sample past its last
+    index. A run ending on the final sample is extended by the sampling interval,
+    which is the only width it can be given. Without this a single-sample run would
+    collapse to zero width and disappear.
+    """
+    if end + 1 < x.size:
+        right = x[end + 1]
+    else:
+        right = x[end] + (x[end] - x[end - 1]) if x.size > 1 else x[end]
+    edges = np.concatenate([x[start : end + 1], [right]])
+    return np.repeat(edges, 2)[1:-1]
+
+
+# pylint: disable=too-many-arguments
+def _add_step_fill(
+    fig: go.Figure,
+    *,
+    x_index: pd.Index,
+    upper: np.ndarray,
+    lower: np.ndarray,
+    segments: list[tuple[int, int]],
+    color: str,
+    name: str,
+) -> None:
+    """Fill between two step curves over each segment, with one legend entry."""
+    x = x_index.to_numpy()
+    for start, end in segments:
+        x_step = _step_x(x, start, end)
+        # slice incl. endpoint
+        y_up = np.repeat(upper[start : end + 1], 2)
+        y_lo = np.repeat(lower[start : end + 1], 2)
+
+        # closed polygon
+        fig.add_trace(
+            go.Scatter(
+                x=np.concatenate([x_step, x_step[::-1]]),
+                y=np.concatenate([y_up, y_lo[::-1]]),
+                mode="lines",
+                line={"width": 0},
+                fill="toself",
+                fillcolor=color,
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    # legend proxy
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker={"size": 10, "color": color},
+            name=name,
+            hoverinfo="skip",
+        )
+    )
+
+
+def _restore_stack_line_widths(traces: tuple[go.Scatter, ...]) -> None:
+    """Re-assert the line widths the stack relies on.
+
+    _apply_common_layout stamps LINE_WIDTH on every scatter, which would outline
+    the fills and reveal the invisible baseline.
+    """
+    for trace in traces:
+        if trace.fill in ("tonexty", "toself"):
+            trace.line.width = 0
+        elif trace.name in ("Grid", "Consumption"):
+            trace.line.width = STACK_LINE_WIDTH
+    traces[0].line.width = 0
+
+
+def plot_power(
+    df: pd.DataFrame,
+    fig: go.Figure | None = None,
+    row: int | None = None,
+) -> go.Figure:
+    """Plot the microgrid power as a cumulative PSC stack.
+
+    Each component is added to the running total in its raw PSC sign, starting
+    from the consumption line, so the top of the stack coincides with the grid
+    line by energy balance. A stack top that drifts away from the grid line means
+    the components do not account for the measured exchange.
+
+    Unlike plot_power_flow, production is not clipped, so PV drawing power is
+    visible rather than silently flattened to zero.
+
+    Args:
+        df: Input DataFrame containing the columns required by prepare_power_data.
+        fig: Optional existing figure to add traces to. If not provided, a new
+            figure is created.
+        row: Optional subplot row index. When provided, common layout and range
+            slider configuration are skipped and axis padding is applied to the
+            specified subplot row.
+
+    Returns:
+        A Plotly figure containing the stacked power traces.
+    """
+    data = prepare_power_data(df)
+
+    if fig is None:
+        fig = go.Figure()
+
+    legend_items = 0
+    first_trace = len(fig.data)
+
+    # Invisible consumption baseline so the first band fills from the cons line.
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data.consumption,
+            mode="lines",
+            line={"width": 0, "shape": "hv"},
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    bands = (
+        (data.has_chp, data.after_chp, "CHP", STACK_CHP),
+        (data.has_pv, data.after_pv, "PV", STACK_PV),
+        (data.has_wind, data.after_wind, "Wind", STACK_WIND),
+    )
+    for present, level, name, color in bands:
+        if not present:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=data.index,
+                y=level,
+                name=name,
+                mode="lines",
+                line={"width": 0, "shape": "hv"},
+                fill="tonexty",
+                fillcolor=color,
+                hovertemplate=f"<b>{name}</b>: %{{y}} kW<extra></extra>",
+            )
+        )
+        legend_items += 1
+
+    if data.has_battery:
+        top = data.after_battery.to_numpy()
+        base = data.after_wind.to_numpy()
+        _add_step_fill(
+            fig,
+            x_index=data.index,
+            upper=top,
+            lower=base,
+            segments=_split_segments(top > base),
+            color=STACK_CHARGE,
+            name="Charge",
+        )
+        _add_step_fill(
+            fig,
+            x_index=data.index,
+            upper=base,
+            lower=top,
+            segments=_split_segments(top < base),
+            color=STACK_DISCHARGE,
+            name="Discharge",
+        )
+        legend_items += 2
+
+    # Grid line on top, should visually coincide with the stack top.
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data.grid,
+            name="Grid",
+            line={"color": STACK_GRID, "shape": "hv", "width": STACK_LINE_WIDTH},
+            hovertemplate="<b>Grid</b>: %{y} kW<extra></extra>",
+        )
+    )
+    legend_items += 1
+
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data.consumption,
+            name="Consumption",
+            line={"color": STACK_CONSUMPTION, "shape": "hv", "width": STACK_LINE_WIDTH},
+            hovertemplate="<b>Consumption</b>: %{y} kW<extra></extra>",
+        )
+    )
+    legend_items += 1
+
+    _finalize_time_series_plot(
+        fig,
+        title="Power",
+        y_title="Power (kW)",
+        legend_items=legend_items,
+        x_index=data.index,
+        y_series=[
+            data.consumption,
+            data.after_chp,
+            data.after_pv,
+            data.after_wind,
+            data.after_battery,
+            data.grid,
+        ],
+        row=row,
+    )
+
+    # Zero
+    fig.update_yaxes(
+        zeroline=True,
+        zerolinecolor=ZERO_LINE,
+        zerolinewidth=ZERO_LINE_WIDTH,
+        row=row,
+        col=1 if row is not None else None,
+    )
+    _restore_stack_line_widths(fig.data[first_trace:])
     return fig
 
 
