@@ -29,6 +29,27 @@ class PowerFlowData:
 
 
 @dataclass(frozen=True)
+class PowerData:
+    """Cumulative PSC levels for the stacked power plot.
+
+    Each level is the running sum of the preceding one plus the next component,
+    so after_battery coincides with grid by energy balance.
+    """
+
+    index: pd.Index
+    consumption: pd.Series
+    after_chp: pd.Series
+    after_pv: pd.Series
+    after_wind: pd.Series
+    after_battery: pd.Series
+    grid: pd.Series
+    has_chp: bool
+    has_pv: bool
+    has_wind: bool
+    has_battery: bool
+
+
+@dataclass(frozen=True)
 class EnergyTradeData:
     """Prepared series for energy trade plotting."""
 
@@ -143,6 +164,52 @@ def prepare_power_flow_data(df: pd.DataFrame) -> PowerFlowData:
         charge=charge,
         discharge=discharge,
         grid=grid,
+    )
+
+
+def prepare_power_data(df: pd.DataFrame) -> PowerData:
+    """Prepare cumulative PSC levels for the stacked power plot.
+
+    Unlike prepare_power_flow_data, signs are left in the raw PSC convention
+    (consumption positive, production negative) and production is not clipped, so
+    the running sum closes on the grid series:
+
+        consumption + chp + pv + wind + battery == grid
+
+    Args:
+        df:
+            Input DataFrame containing at least the consumption and grid columns.
+            chp, pv, wind and battery are used if present.
+
+    Returns:
+        A structured container with the consumption baseline, one cumulative level
+        per component, the grid series, and flags for the components present.
+    """
+    require_columns(df, "consumption", "grid")
+
+    def _column(name: str) -> pd.Series:
+        if name in df.columns:
+            return df[name]
+        return pd.Series(0.0, index=df.index)
+
+    cons = df["consumption"]
+    after_chp = cons + _column("chp")
+    after_pv = after_chp + _column("pv")
+    after_wind = after_pv + _column("wind")
+    after_battery = after_wind + _column("battery")
+
+    return PowerData(
+        index=df.index,
+        consumption=cons,
+        after_chp=after_chp,
+        after_pv=after_pv,
+        after_wind=after_wind,
+        after_battery=after_battery,
+        grid=df["grid"],
+        has_chp="chp" in df.columns,
+        has_pv="pv" in df.columns,
+        has_wind="wind" in df.columns,
+        has_battery="battery" in df.columns,
     )
 
 

@@ -5,6 +5,7 @@
 
 import logging
 import os
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -35,28 +36,68 @@ def _align_series_to_index(index: pd.Index, series: pd.Series) -> pd.Series:
     return aligned.reindex(target_index, method="ffill")
 
 
+def _load_dotenv_files(dotenv_path: str | Sequence[str]) -> None:
+    """Load dotenv files in order, later files overriding earlier ones.
+
+    Overriding matters in notebooks: without it a variable loaded for one microgrid
+    survives in the kernel and shadows the file loaded for the next one.
+    """
+    paths = [dotenv_path] if isinstance(dotenv_path, str) else dotenv_path
+    for path in paths:
+        # load_dotenv hands the path to open(), which does not expand "~".
+        expanded = os.path.expanduser(path)
+        if not load_dotenv(dotenv_path=expanded, override=True):
+            _logger.warning("No environment variables loaded from %s.", expanded)
+
+
+_CREDENTIAL_ENV_PAIRS = (
+    ("API_AUTH_KEY", "API_SIGN_SECRET"),
+    ("API_KEY", "API_SECRET"),
+)
+
+
+def _credentials() -> tuple[str, str]:
+    """Return the first credential pair whose key and secret are both set.
+
+    Both halves must come from the same pair, otherwise a key from one dotenv file
+    could end up signed with a secret from another.
+    """
+    for key_var, secret_var in _CREDENTIAL_ENV_PAIRS:
+        key = os.getenv(key_var, "")
+        secret = os.getenv(secret_var, "")
+        if key and secret:
+            return key, secret
+
+    names = " or ".join(f"{k}/{s}" for k, s in _CREDENTIAL_ENV_PAIRS)
+    _logger.warning(
+        "No credentials found (%s). Requests will be unauthenticated.", names
+    )
+    return "", ""
+
+
 async def init_microgrid_data(
     *,
     microgrid_config_file: str | None = None,
     microgrid_config_dir: str | None = None,
-    dotenv_path: str | None = None,
+    dotenv_path: str | Sequence[str] | None = None,
 ) -> MicrogridData:
     """Load MicrogridData instance using environment variables.
 
     Args:
         microgrid_config_file: Path to a microgrid configuration file.
         microgrid_config_dir: Directory containing microgrid configuration files.
-        dotenv_path: Optional path to an environment variable file.
+        dotenv_path: Optional path, or paths, to environment variable files. They
+            are loaded in order and override both earlier files and the current
+            environment, so list the most specific file last.
 
     Returns:
         MicrogridData instance.
     """
     if dotenv_path is not None:
-        load_dotenv(dotenv_path=dotenv_path)
+        _load_dotenv_files(dotenv_path)
 
     service_address = os.environ["REPORTING_API_URL"]
-    api_key = os.getenv("API_KEY", "")
-    api_secret = os.getenv("API_SECRET", "")
+    api_key, api_secret = _credentials()
 
     assets_url = os.environ.get("ASSETS_API_URL")
     if not assets_url:
