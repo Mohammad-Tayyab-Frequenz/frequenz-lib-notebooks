@@ -27,9 +27,9 @@ def test_plot_time_series_battery_usecase_adds_peak_lines() -> None:
     df = pd.DataFrame(
         {
             "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [35.0, 21.0],
             "grid_consumption": [30.0, 25.0],
             "battery_power_flow": [5.0, -4.0],
-            "grid_consumption_without_battery": [35.0, 21.0],
             "peak_before_optimization": [35.0, 35.0],
             "peak_after_optimization": [30.0, 30.0],
             "battery_discharge": [5.0, 0.0],
@@ -42,8 +42,8 @@ def test_plot_time_series_battery_usecase_adds_peak_lines() -> None:
         df,
         time_col="timestamp",
         cols=[
+            "consumption",
             "grid_consumption",
-            "grid_consumption_without_battery",
             "battery_discharge",
             "battery_charge",
             "pv",
@@ -65,9 +65,9 @@ def test_plot_time_series_battery_usecase_accepts_legacy_german_columns() -> Non
     df = pd.DataFrame(
         {
             "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "MID Gesamtverbrauch": [35.0, 21.0],
             "Netzbezug": [30.0, 25.0],
             "Batterie Leistungsfluss": [5.0, -4.0],
-            "Netzbezug ohne Batterie": [35.0, 21.0],
             "Lastspitze vor optimierung": [35.0, 35.0],
             "Lastspitze nach optimierung": [30.0, 30.0],
             "Batterie Entladung": [5.0, 0.0],
@@ -80,5 +80,247 @@ def test_plot_time_series_battery_usecase_accepts_legacy_german_columns() -> Non
     trace_names = [trace.name for trace in fig.data if getattr(trace, "name", None)]
 
     assert "Netzbezug" in trace_names
+    assert "MID Gesamtverbrauch" in trace_names
     assert "Lastspitze vor optimierung" in trace_names
     assert "Lastspitze nach optimierung" in trace_names
+
+
+def test_plot_time_series_battery_usecase_adds_chp_and_wind_to_overlay_stacks() -> None:
+    """CHP and wind should join a production stack anchored on consumption."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [0.0, -4.0],
+            "pv": [12.0, 10.0],
+            "chp": [4.0, 3.0],
+            "wind": [7.0, 5.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=[
+            "consumption",
+            "grid_consumption",
+            "battery_discharge",
+            "battery_charge",
+            "pv",
+        ],
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert "PV" in traces_by_name
+    assert "CHP" in traces_by_name
+    assert "Wind" in traces_by_name
+    assert traces_by_name["CHP"].stackgroup == "production"
+    assert traces_by_name["Wind"].stackgroup == "production"
+    assert traces_by_name["PV"].stackgroup == "production"
+    assert min(traces_by_name["PV"].y) == -12.0
+    assert min(traces_by_name["CHP"].y) == -4.0
+    assert min(traces_by_name["Wind"].y) == -7.0
+    assert traces_by_name["Netzbezug"].stackgroup is None
+    trace_names = [trace.name for trace in fig.data if getattr(trace, "name", None)]
+    assert trace_names.index("Wind") < trace_names.index("CHP")
+    assert trace_names.index("CHP") < trace_names.index("PV")
+    assert trace_names.index("PV") < trace_names.index("Batterie Entladung")
+
+
+def test_plot_time_series_battery_usecase_matches_viz_plotly_battery_stacks() -> None:
+    """Battery discharge and charge should both render downward from their anchors."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [10.0, 21.0],
+            "grid_consumption": [-12.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [-8.0, -4.0],
+            "pv": [17.0, 0.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=[
+            "consumption",
+            "grid_consumption",
+            "battery_discharge",
+            "battery_charge",
+            "pv",
+        ],
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+    battery_charge_traces = [
+        trace
+        for trace in fig.data
+        if getattr(trace, "name", None) == "Batterie Beladung"
+    ]
+    battery_charge_fill_trace = next(
+        trace
+        for trace in battery_charge_traces
+        if getattr(trace, "fill", None) == "toself"
+    )
+    battery_charge_hover_trace = next(
+        trace for trace in battery_charge_traces if getattr(trace, "opacity", None) == 0
+    )
+
+    assert traces_by_name["PV"].stackgroup == "production"
+    assert traces_by_name["Batterie Entladung"].stackgroup == "production"
+    assert traces_by_name["Batterie Entladung"].opacity == 0.3
+    assert min(traces_by_name["Batterie Entladung"].y) == -5.0
+    assert min(traces_by_name["PV"].y) == -17.0
+    assert battery_charge_fill_trace.fill == "toself"
+    assert min(battery_charge_fill_trace.y) == -20.0
+    assert max(battery_charge_hover_trace.y) == 25.0
+    assert min(battery_charge_hover_trace.y) == -12.0
+
+
+def test_plot_time_series_battery_usecase_discharge_uses_grid_baseline_without_pv() -> (
+    None
+):
+    """Battery discharge should still stack down from consumption without PV."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 21.0],
+            "battery_power_flow": [5.0, 0.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [0.0, 0.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=[
+            "consumption",
+            "grid_consumption",
+            "battery_discharge",
+            "battery_charge",
+        ],
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert traces_by_name["Batterie Entladung"].stackgroup == "production"
+    assert min(traces_by_name["Batterie Entladung"].y) == -5.0
+
+
+def test_plot_time_series_battery_usecase_legacy_mode_restores_old_stacking() -> None:
+    """Energy-balance mode should stack charging above all active supply traces."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [10.0, 21.0],
+            "grid_consumption": [-12.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [-8.0, -4.0],
+            "pv": [17.0, 0.0],
+            "chp": [4.0, 3.0],
+            "wind": [7.0, 5.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=[
+            "consumption",
+            "grid_consumption",
+            "battery_discharge",
+            "battery_charge",
+            "pv",
+        ],
+        stack_mode="energy_balance",
+    )
+
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+    battery_charge_traces = [
+        trace
+        for trace in fig.data
+        if getattr(trace, "name", None) == "Batterie Beladung"
+    ]
+    battery_charge_fill_trace = next(
+        trace
+        for trace in battery_charge_traces
+        if getattr(trace, "fill", None) == "toself"
+    )
+    production_baseline_trace = next(
+        trace
+        for trace in fig.data
+        if getattr(trace, "stackgroup", None) == "production"
+        and getattr(trace, "name", None) is None
+        and getattr(trace, "fill", None) is None
+    )
+
+    assert max(traces_by_name["Batterie Entladung"].y) == 5.0
+    assert max(traces_by_name["PV"].y) == 17.0
+    assert max(battery_charge_fill_trace.y) == 18.0
+    assert list(production_baseline_trace.y) == [-12.0, 25.0]
+    trace_names = [trace.name for trace in fig.data if getattr(trace, "name", None)]
+    assert trace_names.index("Batterie Entladung") < trace_names.index("CHP")
+    assert trace_names.index("CHP") < trace_names.index("Wind")
+    assert trace_names.index("Wind") < trace_names.index("PV")
+
+
+def test_plot_time_series_battery_usecase_energy_balance_alias() -> None:
+    """Energy-balance mode should anchor charging above the full supply stack."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "consumption": [10.0, 21.0],
+            "grid_consumption": [-12.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [-8.0, -4.0],
+            "pv": [17.0, 0.0],
+            "chp": [4.0, 0.0],
+            "wind": [7.0, 0.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=[
+            "consumption",
+            "grid_consumption",
+            "battery_discharge",
+            "battery_charge",
+            "pv",
+        ],
+        stack_mode="energy_balance",
+    )
+
+    battery_charge_traces = [
+        trace
+        for trace in fig.data
+        if getattr(trace, "name", None) == "Batterie Beladung"
+    ]
+    battery_charge_fill_trace = next(
+        trace
+        for trace in battery_charge_traces
+        if getattr(trace, "fill", None) == "toself"
+    )
+    battery_charge_hover_trace = next(
+        trace for trace in battery_charge_traces if getattr(trace, "opacity", None) == 0
+    )
+
+    assert max(battery_charge_fill_trace.y) == 18.0
+    assert min(battery_charge_hover_trace.y) == 10.0
+    assert max(battery_charge_hover_trace.y) == 21.0
