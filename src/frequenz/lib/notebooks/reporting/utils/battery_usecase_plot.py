@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -17,22 +18,73 @@ from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
 _DISPLAY_LABELS: dict[str, str] = {
     "grid_consumption": "Netzbezug",
     "grid_consumption_without_battery": "Netzbezug ohne Batterie",
+    "day_ahead_price": "Day Ahead Preis",
+    "consumption": "Verbrauch",
     "battery_power_flow": "Batterie Leistungsfluss",
     "battery_discharge": "Batterie Entladung",
     "battery_charge": "Batterie Beladung",
     "peak_before_optimization": "Lastspitze vor optimierung",
     "peak_after_optimization": "Lastspitze nach optimierung",
     "pv": "PV",
+    "chp": "CHP",
+    "wind": "Wind",
 }
 
 _PEAK_COLUMNS = ["peak_before_optimization", "peak_after_optimization"]
 
-_REQUIRED_OVERLAY_COLUMNS = [
-    "grid_consumption",
-    "grid_consumption_without_battery",
+_REQUIRED_PRODUCTION_OVERLAY_COLUMNS = ["grid_consumption"]
+_REQUIRED_BATTERY_OVERLAY_COLUMNS = [
+    "consumption",
     "battery_discharge",
     "battery_charge",
 ]
+
+_BATTERY_OVERLAY_ALPHA = 0.3
+_PRODUCTION_OVERLAY_ALPHA = 1
+_MIN_BATTERY_OVERLAY_POWER = 0.25
+_PRODUCTION_COLUMN_ORDER = [
+    "BHKW-Erzeugung",
+    "BHKW Erzeugung",
+    "CHP-Production",
+    "CHP Production",
+    "CHP",
+    "chp",
+    "Wind-Erzeugung",
+    "Wind Erzeugung",
+    "Wind-Production",
+    "Wind Production",
+    "Wind",
+    "wind",
+    _DISPLAY_LABELS["pv"],
+    "PV-Erzeugung",
+    "PV Erzeugung",
+    "PV-Production",
+    "PV Production",
+    "pv",
+]
+
+_PRODUCTION_DEFAULT_COLORS: dict[str, str] = {
+    _DISPLAY_LABELS["pv"]: COLOR_DICT["PV"],
+    _DISPLAY_LABELS["chp"]: COLOR_DICT["BHKW-Erzeugung"],
+    _DISPLAY_LABELS["wind"]: COLOR_DICT["Wind-Erzeugung"],
+}
+
+
+def _resolve_battery_usecase_color(color_dict: dict[str, str], name: str) -> str:
+    """Resolve display colors using battery-usecase semantics."""
+    if name == _DISPLAY_LABELS["battery_discharge"]:
+        return (
+            color_dict.get(name)
+            or color_dict.get("Battery Charge")
+            or COLOR_DICT["Battery Charge"]
+        )
+    if name == _DISPLAY_LABELS["battery_charge"]:
+        return (
+            color_dict.get(name)
+            or color_dict.get("Battery Discharge")
+            or COLOR_DICT["Battery Discharge"]
+        )
+    return color_dict.get(name) or COLOR_DICT.get(name) or COLOR_DICT["PV"]
 
 
 # pylint: disable=too-many-arguments, too-many-locals
@@ -50,7 +102,7 @@ def prepare_battery_usecase_plot(
     battery_charging: str,
     battery_discharging: str,
     pv_col: str,
-    grid_consumption_without_battery: str,
+    consumption_col: str,
     grid_consumption: str,
 ) -> tuple[
     pd.DataFrame,
@@ -62,7 +114,6 @@ def prepare_battery_usecase_plot(
     dict[str, str],
 ]:
     """Normalize battery-usecase inputs, apply plot defaults, and build color map."""
-    # Build rename map: legacy display names + custom column names → canonical
     normalize_map: dict[str, str] = {v: k for k, v in _DISPLAY_LABELS.items()}
     normalize_map.update(
         {
@@ -70,7 +121,7 @@ def prepare_battery_usecase_plot(
             battery_charging: "battery_discharge",
             battery_discharging: "battery_charge",
             pv_col: "pv",
-            grid_consumption_without_battery: "grid_consumption_without_battery",
+            consumption_col: "consumption",
             grid_consumption: "grid_consumption",
         }
     )
@@ -96,9 +147,18 @@ def prepare_battery_usecase_plot(
         list(secondary_y_cols) if secondary_y_cols is not None else None, normalize_map
     )
 
-    if "pv" in df.columns:
-        fill_cols = ["pv"] if fill_cols is None else _ensure(fill_cols, ["pv"])
-        plot_order = _ensure(plot_order, ["pv"])
+    for canonical_name in ("pv", "chp", "wind"):
+        if canonical_name in df.columns:
+            fill_cols = (
+                [canonical_name]
+                if fill_cols is None and canonical_name == "pv"
+                else _ensure(fill_cols, [canonical_name])
+            )
+            plot_order = _ensure(plot_order, [canonical_name])
+
+    if "consumption" in df.columns:
+        # Plain reference line, not a fill — just make sure it's plotted.
+        plot_order = _ensure(plot_order, ["consumption"])
 
     peak_columns = [c for c in _PEAK_COLUMNS if c in df.columns]
     cols = _ensure(cols, peak_columns)
@@ -117,147 +177,342 @@ def prepare_battery_usecase_plot(
     colors = dict(color_dict or {})
     colors.setdefault(_DISPLAY_LABELS["grid_consumption"], COLOR_DICT["Netzbezug"])
     colors.setdefault(
-        _DISPLAY_LABELS["grid_consumption_without_battery"], COLOR_DICT["Netzbezug"]
+        _DISPLAY_LABELS["battery_discharge"], COLOR_DICT["Battery Charge"]
+    )
+    colors.setdefault(
+        _DISPLAY_LABELS["battery_charge"], COLOR_DICT["Battery Discharge"]
     )
     for peak_col in peak_columns:
         colors.setdefault(_DISPLAY_LABELS[peak_col], COLOR_DICT["peak"])
 
-    display_pv = _DISPLAY_LABELS["pv"]
-    if display_pv in df.columns:
+    for display_name, default_color in _PRODUCTION_DEFAULT_COLORS.items():
+        if display_name in df.columns:
+            if cols is None:
+                cols = [
+                    c
+                    for c in df.select_dtypes(include="number").columns
+                    if c != time_col
+                ]
+            elif display_name not in cols:
+                cols = [*cols, display_name]
+            colors.setdefault(display_name, default_color)
+
+    display_consumption = _DISPLAY_LABELS["consumption"]
+    if display_consumption in df.columns:
         if cols is None:
             cols = [
                 c for c in df.select_dtypes(include="number").columns if c != time_col
             ]
-        elif display_pv not in cols:
-            cols = [*cols, display_pv]
-        colors.setdefault(display_pv, COLOR_DICT["PV"])
+        elif display_consumption not in cols:
+            cols = [*cols, display_consumption]
+        colors.setdefault(
+            display_consumption,
+            COLOR_DICT.get("Verbrauch") or COLOR_DICT.get("Consumption") or "#6c757d",
+        )
 
     return df, cols, fill_cols, dotted_cols, plot_order, secondary_y_cols, colors
 
 
-# pylint: disable=too-many-locals
+_PRODUCTION_STACK_GROUP = "production"
+BatteryUsecaseStackMode = Literal["psc", "energy_balance"]
+
+
 def add_battery_usecase_overlay_traces(
     fig: go.Figure,
     source_df: pd.DataFrame,
     *,
     color_dict: dict[str, str],
     yaxis_title: str,
+    stack_mode: BatteryUsecaseStackMode,
 ) -> None:
-    """Hide base battery traces and add charge/discharge filled overlay areas."""
-    # Hide base traces replaced by overlay fills
+    """Hide base traces and re-add them using viz_plotly-style stackgroups."""
+    production_columns = _get_production_columns(source_df)
+
     hidden_names = {
         _DISPLAY_LABELS["battery_power_flow"],
         _DISPLAY_LABELS["battery_discharge"],
         _DISPLAY_LABELS["battery_charge"],
         "Battery Charge",
         "Battery Discharge",
+        *production_columns,
     }
-    for trace in fig.data:
-        if isinstance(trace, go.Scatter) and trace.name in hidden_names:
-            trace.showlegend = False
-            trace.hoverinfo = "skip"
-            trace.fill = "none"
-            trace.line = {
-                "color": "rgba(0,0,0,0)",
-                "width": 0,
-                "shape": "hv",
-            }
-
-    # Check all required columns are present before adding overlays
-    required = [_DISPLAY_LABELS[c] for c in _REQUIRED_OVERLAY_COLUMNS]
-    if not all(c in source_df.columns for c in required):
-        return
+    fig.data = tuple(
+        trace
+        for trace in fig.data
+        if not (isinstance(trace, go.Scatter) and trace.name in hidden_names)
+    )
 
     display_grid = _DISPLAY_LABELS["grid_consumption"]
-    display_grid_no_batt = _DISPLAY_LABELS["grid_consumption_without_battery"]
-    charge_name = _DISPLAY_LABELS["battery_discharge"]
-    discharge_name = _DISPLAY_LABELS["battery_charge"]
+    display_consumption = _DISPLAY_LABELS["consumption"]
+    entladung_name = _DISPLAY_LABELS["battery_discharge"]  # "Batterie Entladung"
+    beladung_name = _DISPLAY_LABELS["battery_charge"]  # "Batterie Beladung"
 
-    charge_color = (
-        color_dict.get(charge_name)
-        or color_dict.get("Battery Charge")
-        or COLOR_DICT["Battery Charge"]
-    )
-    discharge_color = (
-        color_dict.get(discharge_name)
-        or color_dict.get("Battery Discharge")
-        or COLOR_DICT["Battery Discharge"]
-    )
+    required_production = [
+        _DISPLAY_LABELS[c] for c in _REQUIRED_PRODUCTION_OVERLAY_COLUMNS
+    ]
+    grid_with_battery: pd.Series | None = None
+    consumption: pd.Series | None = None
+    if all(c in source_df.columns for c in required_production):
+        grid_with_battery = pd.to_numeric(source_df[display_grid], errors="coerce")
+    if display_consumption in source_df.columns:
+        consumption = pd.to_numeric(source_df[display_consumption], errors="coerce")
 
-    grid_with_battery = pd.to_numeric(source_df[display_grid], errors="coerce")
-    grid_without_battery = pd.to_numeric(
-        source_df[display_grid_no_batt], errors="coerce"
-    )
-    charging = pd.to_numeric(source_df[charge_name], errors="coerce")
-    discharging = pd.to_numeric(source_df[discharge_name], errors="coerce")
+    required_battery = [_DISPLAY_LABELS[c] for c in _REQUIRED_BATTERY_OVERLAY_COLUMNS]
+    if grid_with_battery is not None and consumption is not None:
+        if stack_mode == "energy_balance":
+            supply_columns = [entladung_name, *production_columns]
+            supply_baseline = grid_with_battery
+            finite_mask = grid_with_battery.notna()
+            supply_direction: Literal["up", "down"] = "up"
+        else:
+            preferred_supply_order = [
+                _DISPLAY_LABELS["wind"],
+                _DISPLAY_LABELS["chp"],
+                _DISPLAY_LABELS["pv"],
+                entladung_name,
+            ]
+            supply_columns = [
+                column
+                for column in preferred_supply_order
+                if column == entladung_name or column in production_columns
+            ]
+            supply_baseline = consumption
+            finite_mask = consumption.notna()
+            supply_direction = "down"
+        _add_cumulative_supply_stack_traces(
+            fig,
+            source_df,
+            baseline=supply_baseline,
+            finite_mask=finite_mask,
+            columns=supply_columns,
+            color_dict=color_dict,
+            yaxis_title=yaxis_title,
+            direction=supply_direction,
+            opacity_overrides={entladung_name: _BATTERY_OVERLAY_ALPHA},
+            min_power_overrides={entladung_name: _MIN_BATTERY_OVERLAY_POWER},
+        )
 
-    finite_grid = grid_with_battery.notna() & grid_without_battery.notna()
-    charge_mask = finite_grid & charging.gt(0.0).fillna(False)
-    discharge_mask = finite_grid & discharging.lt(0.0).fillna(False)
-
-    for trace in _hv_fill_traces(
-        source_df.index,
-        grid_without_battery.where(charge_mask),
-        grid_with_battery.where(charge_mask),
-        charge_mask,
-        charge_color,
-        charge_name,
+    if (
+        all(c in source_df.columns for c in required_battery)
+        and consumption is not None
     ):
-        fig.add_trace(trace)
+        _add_battery_charge_overlay(
+            fig,
+            source_df,
+            column=beladung_name,
+            grid=grid_with_battery,
+            consumption=consumption,
+            color_dict=color_dict,
+            yaxis_title=yaxis_title,
+            stack_mode=stack_mode,
+        )
 
-    for trace in _hv_fill_traces(
-        source_df.index,
-        grid_with_battery.where(discharge_mask),
-        grid_without_battery.where(discharge_mask),
-        discharge_mask,
-        discharge_color,
-        discharge_name,
-    ):
-        fig.add_trace(trace)
+    fig.update_layout(legend={"groupclick": "togglegroup"})
+    _move_grid_traces_to_top(fig)
+
+
+def _get_production_columns(source_df: pd.DataFrame) -> list[str]:
+    """Return supported production columns in deterministic display order."""
+    production_columns: list[str] = []
+    for column in _PRODUCTION_COLUMN_ORDER:
+        if column in source_df.columns and column not in production_columns:
+            production_columns.append(column)
+    return production_columns
+
+
+def _add_stack_baseline(
+    fig: go.Figure,
+    source_df: pd.DataFrame,
+    *,
+    baseline: pd.Series,
+    stackgroup: str,
+) -> pd.Series:
+    """Add an invisible baseline for a stackgroup and return its finite mask."""
+    finite_baseline = baseline.notna()
+    if not finite_baseline.any():
+        return finite_baseline
 
     fig.add_trace(
         go.Scatter(
             x=source_df.index,
-            y=grid_with_battery.where(charge_mask),
+            y=baseline.where(finite_baseline),
             mode="lines",
-            line={
-                "color": "rgba(0,0,0,0)",
-                "width": 0,
-                "shape": "hv",
-            },
+            line={"color": "rgba(0,0,0,0)", "width": 0, "shape": "hv"},
+            fillcolor="rgba(0,0,0,0)",
+            stackgroup=stackgroup,
             showlegend=False,
+            hoverinfo="skip",
             connectgaps=False,
-            customdata=np.column_stack([charging.to_numpy(dtype=float)]),
-            legendgroup=charge_name,
-            hovertemplate=f"<b>{charge_name}</b>: %{{customdata[0]}} {yaxis_title}<extra></extra>",
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=source_df.index,
-            y=grid_with_battery.where(discharge_mask),
-            mode="lines",
-            line={
-                "color": "rgba(0,0,0,0)",
-                "width": 0,
-                "shape": "hv",
-            },
-            showlegend=False,
-            connectgaps=False,
-            customdata=np.column_stack([discharging.to_numpy(dtype=float)]),
-            legendgroup=discharge_name,
-            hovertemplate=(
-                f"<b>{discharge_name}</b>: "
-                f"%{{customdata[0]}} {yaxis_title}"
-                "<extra></extra>"
-            ),
+    return finite_baseline
+
+
+def _add_cumulative_supply_stack_traces(
+    fig: go.Figure,
+    source_df: pd.DataFrame,
+    *,
+    baseline: pd.Series,
+    finite_mask: pd.Series,
+    columns: list[str],
+    color_dict: dict[str, str],
+    yaxis_title: str,
+    direction: Literal["up", "down"],
+    opacity_overrides: dict[str, float] | None = None,
+    min_power_overrides: dict[str, float] | None = None,
+) -> dict[str, tuple[pd.Series, pd.Series]]:
+    """Add one cumulative supply stack anchored at the given baseline."""
+    if not columns:
+        return {}
+
+    finite_mask = finite_mask & baseline.notna()
+    if not finite_mask.any():
+        return {}
+
+    finite_baseline = _add_stack_baseline(
+        fig,
+        source_df,
+        baseline=baseline.where(finite_mask),
+        stackgroup=_PRODUCTION_STACK_GROUP,
+    )
+    if not finite_baseline.any():
+        return {}
+
+    opacity_overrides = opacity_overrides or {}
+    min_power_overrides = min_power_overrides or {}
+    stack_bounds: dict[str, tuple[pd.Series, pd.Series]] = {}
+    current_top = baseline.where(finite_mask, other=np.nan)
+
+    for column in columns:
+        if column not in source_df.columns:
+            continue
+
+        raw = pd.to_numeric(source_df[column], errors="coerce")
+        magnitude = raw.abs().where(finite_mask, other=np.nan)
+        effective_magnitude = magnitude.where(finite_mask, other=np.nan)
+
+        min_power = min_power_overrides.get(column, 0.0)
+        if direction == "down":
+            effective = (-effective_magnitude).where(effective_magnitude.gt(min_power))
+            next_top = (current_top - effective_magnitude.fillna(0.0)).where(
+                finite_mask, other=np.nan
+            )
+        else:
+            effective = effective_magnitude.where(effective_magnitude.gt(min_power))
+            next_top = (current_top + effective_magnitude.fillna(0.0)).where(
+                finite_mask, other=np.nan
+            )
+        stack_bounds[column] = (current_top.copy(), next_top.copy())
+        current_top = next_top
+
+        color = _resolve_battery_usecase_color(color_dict, column)
+        fig.add_trace(
+            go.Scatter(
+                x=source_df.index,
+                y=effective,
+                mode="lines",
+                name=column,
+                line={"color": color, "width": 0, "shape": "hv"},
+                stackgroup=_PRODUCTION_STACK_GROUP,
+                opacity=opacity_overrides.get(column, _PRODUCTION_OVERLAY_ALPHA),
+                connectgaps=False,
+                customdata=np.column_stack([raw.to_numpy(dtype=float)]),
+                legendgroup=column,
+                hovertemplate=(
+                    f"<b>{column}</b>: %{{customdata[0]}} {yaxis_title}"
+                    "<extra></extra>"
+                ),
+            )
         )
-    )
-    fig.update_layout(
-        legend={
-            "groupclick": "togglegroup",
-        }
-    )
+    return stack_bounds
+
+
+def _add_battery_charge_overlay(
+    fig: go.Figure,
+    source_df: pd.DataFrame,
+    *,
+    column: str,
+    grid: pd.Series | None,
+    consumption: pd.Series,
+    color_dict: dict[str, str],
+    yaxis_title: str,
+    stack_mode: BatteryUsecaseStackMode,
+) -> None:
+    """Add one battery-charge demand overlay for the selected stack mode."""
+    raw = pd.to_numeric(source_df[column], errors="coerce")
+    color = _resolve_battery_usecase_color(color_dict, column)
+    if stack_mode == "energy_balance":
+        anchor = consumption
+        finite_mask = consumption.notna()
+        direction: Literal["up", "down"] = "up"
+    else:
+        if grid is None:
+            return
+        anchor = grid
+        finite_mask = grid.notna()
+        direction = "down"
+    if not finite_mask.any():
+        return
+
+    magnitude = raw.abs()
+    hover_anchor = anchor.where(finite_mask, other=np.nan)
+    charge_mask = finite_mask & magnitude.gt(_MIN_BATTERY_OVERLAY_POWER).fillna(False)
+    if charge_mask.any():
+        charge_base = anchor.where(finite_mask, other=np.nan)
+        if direction == "down":
+            charge_top = (anchor - magnitude.fillna(0.0)).where(
+                finite_mask, other=np.nan
+            )
+        else:
+            charge_top = (anchor + magnitude.fillna(0.0)).where(
+                finite_mask, other=np.nan
+            )
+        charge_traces = _hv_fill_traces(
+            source_df.index,
+            charge_base,
+            charge_top,
+            charge_mask,
+            color,
+            column,
+            alpha=_BATTERY_OVERLAY_ALPHA,
+        )
+        for trace in charge_traces:
+            fig.add_trace(trace)
+
+    if charge_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                x=source_df.index,
+                y=hover_anchor.where(charge_mask),
+                mode="lines",
+                name=column,
+                line={"color": color, "width": 0, "shape": "hv"},
+                opacity=0,
+                showlegend=False,
+                connectgaps=False,
+                customdata=np.column_stack([raw.to_numpy(dtype=float)]),
+                legendgroup=column,
+                hovertemplate=(
+                    f"<b>{column}</b>: %{{customdata[0]}} {yaxis_title}<extra></extra>"
+                ),
+            )
+        )
+
+
+def _move_grid_traces_to_top(fig: go.Figure) -> None:
+    """Move reference-line traces to the end so they render above overlays."""
+    top_names = {
+        _DISPLAY_LABELS["grid_consumption"],
+        _DISPLAY_LABELS["consumption"],
+    }
+    traces = list(fig.data)
+    base_traces = [
+        trace for trace in traces if getattr(trace, "name", None) not in top_names
+    ]
+    top_traces = [
+        trace for trace in traces if getattr(trace, "name", None) in top_names
+    ]
+    fig.data = tuple(base_traces + top_traces)
 
 
 def _with_alpha(color: str | None, alpha: float) -> str | None:
@@ -265,6 +520,21 @@ def _with_alpha(color: str | None, alpha: float) -> str | None:
     if not color:
         return None
     try:
+        parsed = color.strip().lower()
+        if parsed.startswith("rgba(") and parsed.endswith(")"):
+            parts = [part.strip() for part in parsed[5:-1].split(",")]
+            if len(parts) == 4:
+                r, g, b = (float(parts[0]), float(parts[1]), float(parts[2]))
+                return (
+                    f"rgba({int(round(r))},{int(round(g))},{int(round(b))},{alpha:.3f})"
+                )
+        if parsed.startswith("rgb(") and parsed.endswith(")"):
+            parts = [part.strip() for part in parsed[4:-1].split(",")]
+            if len(parts) == 3:
+                r, g, b = (float(parts[0]), float(parts[1]), float(parts[2]))
+                return (
+                    f"rgba({int(round(r))},{int(round(g))},{int(round(b))},{alpha:.3f})"
+                )
         r, g, b, _ = mcolors.to_rgba(color)
     except ValueError:
         return None
@@ -273,7 +543,7 @@ def _with_alpha(color: str | None, alpha: float) -> str | None:
     )
 
 
-# pylint: disable=too-many-locals, too-many-arguments, too-many-positional-arguments
+# pylint: disable=too-many-positional-arguments
 def _hv_fill_traces(
     x: pd.Index,
     base: pd.Series,
@@ -281,6 +551,8 @@ def _hv_fill_traces(
     mask: pd.Series,
     color: str,
     name: str,
+    *,
+    alpha: float = 1.0,
 ) -> list[go.Scatter]:
     """Build filled step polygons for contiguous active intervals."""
     if len(x) < 2:
@@ -321,12 +593,12 @@ def _hv_fill_traces(
                 x=top_x + base_x[::-1],
                 y=top_y + base_y[::-1],
                 fill="toself",
-                fillcolor=_with_alpha(color, 1) or color,
-                line={"color": color, "width": 1.5, "shape": "hv"},
+                fillcolor=_with_alpha(color, alpha) or color,
+                line={"color": color, "width": 0, "shape": "hv"},
                 mode="lines",
+                hoverinfo="skip",
                 name=name if not traces else None,
                 showlegend=not traces,
-                hoverinfo="skip",
                 legendgroup=name,
             )
         )

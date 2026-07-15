@@ -10,6 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from frequenz.lib.notebooks.reporting.utils.battery_usecase_plot import (
+    BatteryUsecaseStackMode,
     _with_alpha,
     add_battery_usecase_overlay_traces,
     prepare_battery_usecase_plot,
@@ -65,10 +66,16 @@ def _split_battery_power_flow(
         if base not in active_order:
             continue
 
-        series = pd.to_numeric(df[base], errors="coerce")
         df = df.copy()
-        df[charge] = series.clip(lower=0)
-        df[discharge] = series.clip(upper=0)
+
+        # Preserve precomputed split columns when they already exist in the input.
+        # When splitting is needed, positive battery power means charge and
+        # negative battery power means discharge.
+        if discharge not in df.columns or charge not in df.columns:
+            series = pd.to_numeric(df[base], errors="coerce")
+            df[charge] = series.clip(lower=0)
+            df[discharge] = series.clip(upper=0)
+
         df = df.drop(columns=[base])
 
         cols = replace(cols, base, (discharge, charge)) or cols
@@ -219,6 +226,7 @@ def plot_time_series(
                     f"Secondary y-axis column '{col}' is not included in the plotted columns."
                 )
     secondary_col_set = set(secondary_cols)
+    raw_pdf = pdf.copy()
 
     pdf, stackgroup_map = _apply_stack_for_production(pdf, cols)
 
@@ -257,6 +265,7 @@ def plot_time_series(
             line_color = COLOR_DICT.get("da_price", line_color)
         fill_color = _with_alpha(line_color, 0.9)
         y_values = _coerce_numeric_series(pdf[col])
+        hover_values = _coerce_numeric_series(raw_pdf[col])
         if col in secondary_col_set:
             if col.lower() == "da_price":
                 trace_unit = "EUR/MWh"
@@ -271,7 +280,10 @@ def plot_time_series(
                 y=y_values,
                 mode="lines",
                 name=col,
-                hovertemplate=f"<b>{col}</b>: %{{y}} {trace_unit}<extra></extra>",
+                customdata=pd.DataFrame({"raw": hover_values}).to_numpy(),
+                hovertemplate=(
+                    f"<b>{col}</b>: %{{customdata[0]}} {trace_unit}<extra></extra>"
+                ),
                 yaxis="y2" if col in secondary_col_set else "y",
                 line=dict(
                     color=line_color,
@@ -351,6 +363,7 @@ def plot_time_series(
             "overlaying": "y",
             "side": "right",
             "showgrid": False,
+            "zeroline": False,
         }
         fig.update_layout(
             yaxis2=yaxis2_updates,
@@ -379,8 +392,9 @@ def plot_time_series_battery_usecase(
     battery_charging: str = "battery_discharge",
     battery_discharging: str = "battery_charge",
     pv_col: str = "pv",
-    grid_consumption_without_battery: str = "grid_consumption_without_battery",
+    consumption_col: str = "consumption",
     grid_consumption: str = "grid_consumption",
+    stack_mode: BatteryUsecaseStackMode = "psc",
     secondary_y_cols: Sequence[str] | None = None,
     secondary_y_title: str | None = None,
 ) -> go.Figure:
@@ -388,7 +402,7 @@ def plot_time_series_battery_usecase(
 
     Builds a reporting plot for battery-usecase analysis by combining the
     standard time-series traces with dedicated filled overlays for battery
-    charging and discharging between the grid-consumption baselines.
+    charging and discharging with selectable legacy/current stacking.
 
     Args:
         df: Source DataFrame containing the battery-usecase time series.
@@ -410,10 +424,14 @@ def plot_time_series_battery_usecase(
         battery_charging: Column containing the battery charging series.
         battery_discharging: Column containing the battery discharging series.
         pv_col: Column containing PV production values.
-        grid_consumption_without_battery: Column containing grid consumption
-            without battery support.
+        consumption_col: Column containing site consumption.
         grid_consumption: Column containing grid consumption with battery
             support.
+        stack_mode: Overlay style selector. ``"psc"`` uses the
+            downward stack from consumption for wind/CHP/PV/battery discharge
+            and downward battery charging from grid. ``"energy_balance"``
+            uses upward stacking with supply traces built on the grid line and
+            battery charging built on the consumption line.
         secondary_y_cols: Optional columns to render on the secondary y-axis.
         secondary_y_title: Secondary y-axis label.
 
@@ -434,7 +452,7 @@ def plot_time_series_battery_usecase(
             battery_charging=battery_charging,
             battery_discharging=battery_discharging,
             pv_col=pv_col,
-            grid_consumption_without_battery=grid_consumption_without_battery,
+            consumption_col=consumption_col,
             grid_consumption=grid_consumption,
         )
     )
@@ -467,6 +485,7 @@ def plot_time_series_battery_usecase(
         source_df,
         color_dict=color_dict,
         yaxis_title=yaxis_title,
+        stack_mode=stack_mode,
     )
     return fig
 

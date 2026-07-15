@@ -143,6 +143,15 @@ columns:
       en: "Electrical output from the wind turbine."
       de: "Elektrische Erzeugung der Windturbine."
 
+  day_ahead_price:
+    raw: "day_ahead_price"
+    display:
+      en: "Day Ahead Price"
+      de: "Day Ahead Preis"
+    description:
+      en: "Day-ahead electricity market price."
+      de: "Day-Ahead-Strommarktpreis."
+
   grid_peak:
     raw: "grid_peak"
     display:
