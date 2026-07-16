@@ -472,6 +472,7 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
     resolution: timedelta,
     *,
     tz_name: str = "Europe/Berlin",
+    price_column: str | None = None,
 ) -> dict[str, float | None | str]:
     """Aggregate key site-level energy and performance metrics from time-series data.
 
@@ -499,6 +500,9 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
         tz_name:
             Timezone used when reporting the date of the peak grid consumption.
             Defaults to ``"Europe/Berlin"``.
+        price_column:
+            Name of the column containing the day-ahead price information.
+            Defaults to ``"day_ahead_price"``.
 
     Returns:
         dict[str, float | None | str]:
@@ -527,6 +531,10 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
             Maximum grid import power (kW)
             - ``peak_date``
             Localized date (``DD.MM.YYYY``) of grid-import peak, or ``None``
+            - ``grid_import_cost_sum``
+            Total import cost based on spot/day-ahead prices (EUR)
+            - ``grid_feed_in_revenue_sum``
+            Total export revenue based on spot/day-ahead prices (EUR)
 
     Raises:
         ValueError:
@@ -622,5 +630,26 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
                 peak_date = ts.tz_convert(tz_name).strftime("%d.%m.%Y")
 
     results["peak_date"] = peak_date
+    if price_column is None:
+        results["grid_import_cost_sum"] = 0.0
+        results["grid_feed_in_revenue_sum"] = 0.0
+        return results
+
+    prices_eur_mwh = energy_report_df[price_column].fillna(0.0).astype(float)
+    # Assuming the grid consumption and grid_feed_in is in kW and not kWh
+    grid_import_energy_kwh = (
+        energy_report_df.get("grid_consumption", zeros).clip(lower=0) * hours_factor
+    )
+    grid_feed_in_energy_kwh = (
+        energy_report_df.get("grid_feed_in", zeros).clip(lower=0) * hours_factor
+    )
+
+    # Day-ahead and spot prices are expected in EUR/MWh. Convert kWh to MWh first.
+    results["grid_import_cost_sum"] = float(
+        (grid_import_energy_kwh * (prices_eur_mwh / 1000.0)).sum()
+    )
+    results["grid_feed_in_revenue_sum"] = float(
+        (grid_feed_in_energy_kwh * (prices_eur_mwh / 1000.0)).sum()
+    )
 
     return results
