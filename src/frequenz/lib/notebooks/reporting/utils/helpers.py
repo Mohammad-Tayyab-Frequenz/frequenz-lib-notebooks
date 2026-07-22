@@ -36,6 +36,7 @@ Notes:
 
 from __future__ import annotations
 
+import os
 import warnings
 from datetime import date, datetime, time
 from typing import Any, Literal, Mapping, cast
@@ -45,6 +46,8 @@ import matplotlib.colors as mcolors
 import pandas as pd
 import plotly.express as px
 import yaml
+from frequenz.client.assets import AssetsApiClient
+from frequenz.client.common.microgrid import MicrogridId
 from frequenz.gridpool import MicrogridConfig
 
 from frequenz.lib.notebooks.reporting.metrics.reporting_metrics import (
@@ -68,6 +71,72 @@ DEFAULT_AGGREGATED_COMPONENT_CONFIG: AggregatedComponentConfig = {
     "chp": ("chp_asset_production", "CHP #"),
     "wind": ("wind_asset_production", "Wind #"),
 }
+
+
+def _extract_component_id(component_id: Any) -> str | None:
+    """Extract the numeric part from a component identifier."""
+    digits = "".join(ch for ch in str(component_id) if ch.isdigit())
+    return digits or None
+
+
+def _resolved_assets_api_config(
+    server_url: str | None,
+    auth_key: str | None,
+    sign_secret: str | None,
+) -> tuple[str, str | None, str | None]:
+    """Resolve Assets API connection settings from args and environment."""
+    resolved_server_url = server_url or os.getenv("ASSETS_API_URL")
+    resolved_auth_key = auth_key or os.getenv("API_KEY")
+    resolved_sign_secret = sign_secret or os.getenv("API_SECRET")
+
+    if not resolved_server_url:
+        raise ValueError(
+            "Assets API URL not configured. Set ASSETS_API_URL or pass server_url."
+        )
+
+    return resolved_server_url, resolved_auth_key, resolved_sign_secret
+
+
+def _component_display_name(component: Any) -> tuple[str, str] | None:
+    """Extract a component-id/display-name pair from an asset component."""
+    component_key = _extract_component_id(getattr(component, "id", None))
+    component_name = getattr(component, "name", None)
+    if component_key and component_name:
+        return component_key, str(component_name)
+    return None
+
+
+async def get_meter_display_names(
+    microgrid_id: int,
+    *,
+    server_url: str | None = None,
+    auth_key: str | None = None,
+    sign_secret: str | None = None,
+) -> dict[str, str]:
+    """Fetch component display names asynchronously from the Assets API."""
+    (
+        resolved_server_url,
+        resolved_auth_key,
+        resolved_sign_secret,
+    ) = _resolved_assets_api_config(server_url, auth_key, sign_secret)
+
+    client = AssetsApiClient(
+        server_url=resolved_server_url,
+        auth_key=resolved_auth_key,
+        sign_secret=resolved_sign_secret,
+    )
+    components = await client.list_microgrid_electrical_components(
+        MicrogridId(microgrid_id)
+    )
+
+    meter_names: dict[str, str] = {}
+    for component in components:
+        component_pair = _component_display_name(component)
+        if component_pair is not None:
+            component_id, component_name = component_pair
+            meter_names[component_id] = component_name
+
+    return meter_names
 
 
 def _get_numeric_series(df: pd.DataFrame, col: str | None) -> pd.Series:
@@ -212,6 +281,7 @@ def label_component_columns(
     column_chp: str = "chp",
     column_ev: str = "ev",
     column_wind: str = "wind",
+    component_display_names: Mapping[str, str] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Rename numeric single-component columns to labeled names.
 
@@ -228,6 +298,8 @@ def label_component_columns(
         column_chp: Key name for CHP component type.
         column_ev: Key name for EV component type.
         column_wind: Key name for wind component type.
+        component_display_names: Optional mapping from numeric component IDs to
+            human-readable display names fetched from the Assets API.
 
     Returns:
         Tuple containing the renamed DataFrame and the list of applied labels
@@ -250,26 +322,45 @@ def label_component_columns(
     ev_ids = ids_if_available(column_ev)
     wind_ids = ids_if_available(column_wind)
 
+    display_names = component_display_names or {}
+
+    def display_label(prefix: str, component_id: str) -> str:
+        component_name = display_names.get(component_id)
+        suffix = f" - {component_name}" if component_name else ""
+        return f"{prefix} #{component_id}{suffix}"
+
     rename: dict[str, str] = {}
     rename.update(
         {
-            c: f"{column_battery.capitalize()} #{c}"
+            c: display_label(column_battery.capitalize(), c)
             for c in single_components
             if c in battery_ids
         }
     )
     rename.update(
-        {c: f"{column_pv.upper()} #{c}" for c in single_components if c in pv_ids}
-    )
-    rename.update(
-        {c: f"{column_ev.upper()} #{c}" for c in single_components if c in ev_ids}
-    )
-    rename.update(
-        {c: f"{column_chp.upper()} #{c}" for c in single_components if c in chp_ids}
+        {
+            c: display_label(column_pv.upper(), c)
+            for c in single_components
+            if c in pv_ids
+        }
     )
     rename.update(
         {
-            c: f"{column_wind.capitalize()} #{c}"
+            c: display_label(column_ev.upper(), c)
+            for c in single_components
+            if c in ev_ids
+        }
+    )
+    rename.update(
+        {
+            c: display_label(column_chp.upper(), c)
+            for c in single_components
+            if c in chp_ids
+        }
+    )
+    rename.update(
+        {
+            c: display_label(column_wind.capitalize(), c)
             for c in single_components
             if c in wind_ids
         }
