@@ -57,6 +57,53 @@ def test_build_component_analysis_selects_all_components_and_melts() -> None:
     assert_frame_equal(result, expected)
 
 
+def test_build_component_analysis_returns_display_names_when_available() -> None:
+    """Display names are surfaced instead of raw `#id` labels when present."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "PV #1179 - PV Roof Meter": [1.2, 1.5],
+            "PV #1188 - PV Yard Meter": [0.7, 0.8],
+        }
+    )
+
+    result = build_component_analysis(
+        energy_report_df,
+        selection_filter=["All"],
+        component_label="PV",
+        value_col_name="pv_asset_production",
+    )
+
+    assert result["PV"].tolist() == [
+        "PV #1179 - PV Roof Meter",
+        "PV #1179 - PV Roof Meter",
+        "PV #1188 - PV Yard Meter",
+        "PV #1188 - PV Yard Meter",
+    ]
+    assert result["pv_asset_production"].tolist() == [1.2, 1.5, 0.7, 0.8]
+
+
+def test_build_component_analysis_can_select_by_display_name() -> None:
+    """A display-name selection should match the fully labeled component column."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "PV #1179 - PV Roof Meter": [1.2],
+            "PV #1188 - PV Yard Meter": [0.7],
+        }
+    )
+
+    result = build_component_analysis(
+        energy_report_df,
+        selection_filter=["PV #1179 - PV Roof Meter"],
+        component_label="PV",
+        value_col_name="pv_asset_production",
+    )
+
+    assert result["PV"].tolist() == ["PV #1179 - PV Roof Meter"]
+    assert result["pv_asset_production"].tolist() == [1.2]
+
+
 def test_build_component_analysis_returns_empty_when_columns_missing() -> None:
     """A missing component selection should return a typed empty frame."""
     energy_report_df = pd.DataFrame(
@@ -118,6 +165,32 @@ def test_assemble_component_analysis_scales_and_truncates_component_sum() -> Non
     assert_frame_equal(result_df, expected_df)
     assert component_sum == 2.0
     assert filter_text == "All"
+
+
+def test_assemble_component_analysis_coerces_object_values_to_numeric() -> None:
+    """Object-typed component values should still be scaled and rounded."""
+    analyse_df, component_sum, filter_text = assemble_component_analysis(
+        component_filter=["#1179"],
+        component_key="pv",
+        component_types=["pv"],
+        energy_report_df=pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+                "PV #1179 - PV Roof Meter": ["-1.2345"],
+            }
+        ),
+        timestep_hours=1.0,
+        mapper=ColumnMapper.from_default(locale="en"),
+        component_label="PV",
+        value_col_name="pv_asset_production",
+        invert_sign=True,
+        trunc_values=True,
+    )
+
+    assert analyse_df["PV"].tolist() == ["PV #1179 - PV Roof Meter"]
+    assert analyse_df["PV-Production"].tolist() == [1.234]
+    assert component_sum == 1.234
+    assert filter_text == "#1179"
 
 
 def test_build_overview_df_keeps_expected_optional_columns() -> None:
