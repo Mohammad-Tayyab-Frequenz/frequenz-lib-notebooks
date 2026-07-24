@@ -135,6 +135,7 @@ def create_energy_report_df(
     assume_tz: str = "UTC",
     fill_missing_values: bool = True,
     aggregated_component_config: AggregatedComponentConfig | None = None,
+    component_display_names: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Create a normalized Energy Report DataFrame with selected columns.
 
@@ -156,6 +157,9 @@ def create_energy_report_df(
         aggregated_component_config: Optional mapping of component types to aggregated
             column metadata used when filling missing aggregates. Defaults to the shared
             `DEFAULT_AGGREGATED_COMPONENT_CONFIG`.
+        component_display_names: Optional mapping from numeric component IDs to
+            display names fetched from the Assets API, typically passed in from
+            notebook code after awaiting ``get_meter_display_names()``.
 
     Returns:
         The Energy Report DataFrame with standardized and selected columns.
@@ -204,6 +208,7 @@ def create_energy_report_df(
         column_chp="chp",
         column_ev="ev",
         column_wind="wind",
+        component_display_names=component_display_names,
     )
 
     # Determine relevant columns based on component types

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
+from frequenz.client.common.microgrid import MicrogridId
 from frequenz.gridpool import MicrogridConfig
 from pandas.testing import assert_frame_equal, assert_series_equal
 
@@ -23,6 +24,7 @@ from frequenz.lib.notebooks.reporting.utils.helpers import (
     convert_timezone,
     fill_aggregated_component_columns,
     fmt_to_de_system,
+    get_meter_display_names,
     label_component_columns,
     long_to_wide,
     set_date_to_midnight,
@@ -148,6 +150,56 @@ def test_label_component_columns_applies_expected_prefixes() -> None:
         "constant",
     ]
     assert labels == ["Battery #1", "PV #2", "EV #3", "CHP #4"]
+
+
+def test_label_component_columns_appends_display_names() -> None:
+    """Available display names are appended to the generated labels."""
+    df = pd.DataFrame({"2": [20], "constant": [99]})
+    config = _DummyMicrogridConfig({"pv": ["2"]})
+
+    renamed, labels = label_component_columns(
+        df,
+        cast(MicrogridConfig, config),
+        component_display_names={"2": "PV Roof Meter"},
+    )
+
+    assert renamed.columns.tolist() == ["PV #2 - PV Roof Meter", "constant"]
+    assert labels == ["PV #2 - PV Roof Meter"]
+
+
+@pytest.mark.asyncio
+async def test_get_meter_display_names_extracts_all_component_names() -> None:
+    """The async helper should extract names for all returned components."""
+
+    class _Component:
+        def __init__(self, component_id: str, name: str) -> None:
+            self.id = component_id
+            self.name = name
+
+    class _FakeClient:
+        async def list_microgrid_electrical_components(
+            self, microgrid_id: MicrogridId
+        ) -> list[_Component]:
+            assert microgrid_id == MicrogridId(241)
+            return [
+                _Component("ElectricalComponentId(1179)", "meter_pq_0"),
+                _Component("ElectricalComponentId(1188)", "meter_GT"),
+                _Component("ElectricalComponentId(1189)", "GT_1"),
+            ]
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "frequenz.lib.notebooks.reporting.utils.helpers.AssetsApiClient",
+            lambda server_url, auth_key=None, sign_secret=None: _FakeClient(),
+        )
+        result = await get_meter_display_names(
+            241, server_url="grpc://assets.example.com:443"
+        )
+        assert result == {
+            "1179": "meter_pq_0",
+            "1188": "meter_GT",
+            "1189": "GT_1",
+        }
 
 
 def test_set_date_to_midnight_creates_timezone_aware_midnight() -> None:

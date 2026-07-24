@@ -55,6 +55,33 @@ import pandas as pd
 from .column_mapper import ColumnMapper
 
 
+def _extract_component_id(component_label: str, column_name: str) -> str | None:
+    """Extract a component ID from either legacy or display-name labels."""
+    prefix_with_hash = f"{component_label} #"
+    if not column_name.startswith(prefix_with_hash):
+        return None
+
+    remainder = column_name[len(prefix_with_hash) :]
+    component_id = remainder.split(" ", maxsplit=1)[0]
+    return component_id if component_id.isdigit() else None
+
+
+def _format_component_value(component_label: str, column_name: str) -> str:
+    """Convert a component column name into the final display value."""
+    component_id = _extract_component_id(component_label, column_name)
+    if component_id is None:
+        return column_name
+
+    remainder = column_name.split(f"#{component_id}", maxsplit=1)[1].strip()
+    if not remainder:
+        return f"#{component_id}"
+
+    if remainder.startswith("-"):
+        return f"{component_label} #{component_id} {remainder}"
+
+    return remainder
+
+
 def build_component_analysis(
     energy_report_df: pd.DataFrame,
     selection_filter: Iterable[str],
@@ -94,18 +121,36 @@ def build_component_analysis(
             the appropriate columns.
     """
     prefix = f"{component_label} #"
+    comp_columns: list[str] = []
 
-    # Select columns
     if any(str(x).lower() == "all" for x in selection_filter):
         comp_columns = [
             col for col in energy_report_df.columns if col.startswith(prefix)
         ]
     else:
-        comp_columns = [
-            f"{component_label} {x}"
-            for x in selection_filter
-            if f"{component_label} {x}" in energy_report_df.columns
-        ]
+        seen_columns: set[str] = set()
+        for selected_component in selection_filter:
+            normalized_selection = str(selected_component).strip()
+            selected_prefix = (
+                f"{component_label} {normalized_selection}"
+                if not normalized_selection.startswith(f"{component_label} #")
+                else normalized_selection
+            )
+            for col in energy_report_df.columns:
+                if col in seen_columns or not col.startswith(prefix):
+                    continue
+
+                if col == selected_prefix or col.startswith(f"{selected_prefix} "):
+                    comp_columns.append(col)
+                    seen_columns.add(col)
+                    continue
+
+                if (
+                    _format_component_value(component_label, col)
+                    == normalized_selection
+                ):
+                    comp_columns.append(col)
+                    seen_columns.add(col)
 
     if not comp_columns:
         return pd.DataFrame(columns=["timestamp", component_label, value_col_name])
@@ -122,9 +167,8 @@ def build_component_analysis(
         value_name=value_col_name,
     )
 
-    # Keep only the number after "<component_label> "
-    analyse_df[component_label] = analyse_df[component_label].str.replace(
-        f"{component_label} ", "", regex=False
+    analyse_df[component_label] = analyse_df[component_label].map(
+        lambda column_name: _format_component_value(component_label, column_name)
     )
 
     return analyse_df
@@ -211,6 +255,11 @@ def assemble_component_analysis(
         component_filter,
         component_label=component_label,
         value_col_name=value_col_name,
+    )
+
+    analyse_df[value_col_name] = pd.to_numeric(
+        analyse_df[value_col_name],
+        errors="coerce",
     )
 
     # Calculate timestep scaling according to resolution

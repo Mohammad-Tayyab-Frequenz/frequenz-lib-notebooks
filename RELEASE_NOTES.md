@@ -10,7 +10,7 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- Reporting utilities now support appending Assets API display names to single-component labels such as `PV #1179 - PV Roof Meter`.
 
 ## Bug Fixes
 
