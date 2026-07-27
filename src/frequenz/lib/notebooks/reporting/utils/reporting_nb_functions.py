@@ -413,7 +413,7 @@ def compute_energy_summary(
             - ``pv_asset_production`` — Photovoltaic production
             - ``wind_asset_production`` — Wind turbine production
             - ``chp_asset_production`` — CHP unit production
-            - ``grid_consumption`` — Grid import power
+            - ``grid_consumption`` — Grid power, clipped to positive import values
         resolution:
             Sampling interval between observations (e.g. ``timedelta(minutes=15)``),
             used to convert power values (kW) into energy (kWh).
@@ -472,6 +472,7 @@ def compute_energy_summary(
 
     # Replace NaNs with 0 for safe aggregation.
     data = df[cols].fillna(0.0)
+    data["grid_consumption"] = data["grid_consumption"].clip(lower=0)
 
     # Vectorized totals
     # Sum of instantaneous samples (kW) across all timesteps for each column
