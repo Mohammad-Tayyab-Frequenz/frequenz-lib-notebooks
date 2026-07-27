@@ -404,6 +404,33 @@ def test_compute_energy_summary_includes_rollups_and_percentages() -> None:
     assert_frame_equal(result, expected)
 
 
+def test_compute_energy_summary_uses_positive_grid_consumption_only() -> None:
+    """Energy summaries should not let grid export cancel grid import."""
+    df = pd.DataFrame(
+        {
+            "pv_asset_production": [2.0, 0.0],
+            "grid_consumption": [-5.0, 3.0],
+        }
+    )
+
+    result = compute_energy_summary(
+        df,
+        resolution=timedelta(hours=1),
+    )
+
+    expected = pd.DataFrame(
+        {
+            "Energy Source": ["PV", "Grid Consumption"],
+            "Energy [kWh]": [2.0, 3.0],
+            "Power [kW]": [2.0, 3.0],
+            "Mean [kW]": [1.0, 1.5],
+            "Energy %": [40.0, 60.0],
+        }
+    )
+
+    assert_frame_equal(result, expected)
+
+
 def test_compute_energy_summary_rejects_non_positive_resolution() -> None:
     """A non-positive aggregation step must fail clearly."""
     with pytest.raises(ValueError, match="resolution must be positive"):
