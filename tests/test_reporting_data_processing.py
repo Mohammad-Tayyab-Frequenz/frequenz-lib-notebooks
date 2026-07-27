@@ -37,7 +37,10 @@ class _DummyMicrogridConfig:
     def component_types(self) -> list[str]:
         return list(self.mapping.keys())
 
-    def component_type_ids(self, component_type: str) -> list[str]:
+    def component_type_ids(
+        self, component_type: str, component_category: str | None = None
+    ) -> list[str]:
+        del component_category
         return self.mapping.get(component_type, [])
 
 

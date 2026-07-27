@@ -111,15 +111,28 @@ def test_convert_timezone_aware_series_and_type_validation() -> None:
 
 @dataclass
 class _DummyMicrogridConfig:
-    """Minimal config stub exposing component type helpers."""
+    """Minimal config stub exposing component type helpers.
 
-    mapping: dict[str, list[str]]
+    ``mapping`` maps a component type to its IDs grouped by category
+    (``"meter"``, ``"inverter"``, ``"component"``), mirroring
+    ``MicrogridConfig.component_type_ids()``.
+    """
+
+    mapping: dict[str, dict[str, list[str]]]
 
     def component_types(self) -> list[str]:
         return list(self.mapping.keys())
 
-    def component_type_ids(self, component_type: str) -> list[str]:
-        return self.mapping.get(component_type, [])
+    def component_type_ids(
+        self, component_type: str, component_category: str | None = None
+    ) -> list[str]:
+        categories = self.mapping.get(component_type, {})
+        if component_category is None:
+            for category in ("meter", "inverter", "component"):
+                if categories.get(category):
+                    return categories[category]
+            return []
+        return categories.get(component_category, [])
 
 
 def test_label_component_columns_applies_expected_prefixes() -> None:
@@ -134,7 +147,12 @@ def test_label_component_columns_applies_expected_prefixes() -> None:
         }
     )
     config = _DummyMicrogridConfig(
-        {"battery": ["1"], "pv": ["2"], "ev": ["3"], "chp": ["4"]}
+        {
+            "battery": {"meter": ["1"]},
+            "pv": {"meter": ["2"]},
+            "ev": {"meter": ["3"]},
+            "chp": {"meter": ["4"]},
+        }
     )
 
     renamed, labels = label_component_columns(
@@ -152,10 +170,37 @@ def test_label_component_columns_applies_expected_prefixes() -> None:
     assert labels == ["Battery #1", "PV #2", "EV #3", "CHP #4"]
 
 
+def test_label_component_columns_labels_meter_and_inverter_ids() -> None:
+    """Meter and inverter IDs are both labeled even when meter is configured.
+
+    Regression test: ``component_type_ids()`` without a category returns only
+    the default (meter-preferred) IDs, so labeling must query each category
+    explicitly to avoid silently dropping inverter/component-only columns.
+    """
+    df = pd.DataFrame(
+        {
+            "200": [1.0],
+            "201": [2.0],
+            "202": [3.0],
+        }
+    )
+    config = _DummyMicrogridConfig(
+        {"battery": {"meter": ["200"], "inverter": ["201"], "component": ["202"]}}
+    )
+
+    renamed, labels = label_component_columns(
+        df,
+        cast(MicrogridConfig, config),
+    )
+
+    assert renamed.columns.tolist() == ["Battery #200", "Battery #201", "Battery #202"]
+    assert labels == ["Battery #200", "Battery #201", "Battery #202"]
+
+
 def test_label_component_columns_appends_display_names() -> None:
     """Available display names are appended to the generated labels."""
     df = pd.DataFrame({"2": [20], "constant": [99]})
-    config = _DummyMicrogridConfig({"pv": ["2"]})
+    config = _DummyMicrogridConfig({"pv": {"meter": ["2"]}})
 
     renamed, labels = label_component_columns(
         df,
