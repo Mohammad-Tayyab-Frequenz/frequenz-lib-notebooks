@@ -48,9 +48,10 @@ ensuring resilient operation even with partially populated datasets.
 """
 
 from datetime import datetime, timedelta
-from typing import Iterable, Union, cast
+from typing import Iterable, Literal, Union, cast
 
 import pandas as pd
+from frequenz.gridpool import MicrogridConfig
 
 from .column_mapper import ColumnMapper
 
@@ -82,11 +83,63 @@ def _format_component_value(component_label: str, column_name: str) -> str:
     return remainder
 
 
+# pylint: disable=too-many-arguments, too-many-positional-arguments
+def _select_component_columns(
+    energy_report_df: pd.DataFrame,
+    selection_filter: Iterable[str],
+    component_label: str,
+    allowed_component_ids: set[str] | None = None,
+) -> list[str]:
+    """Resolve component columns from user selection and optional ID constraints."""
+    prefix = f"{component_label} #"
+    comp_columns: list[str] = []
+    selected_components = list(selection_filter)
+
+    if any(str(x).lower() == "all" for x in selected_components):
+        comp_columns = [
+            col for col in energy_report_df.columns if col.startswith(prefix)
+        ]
+    else:
+        seen_columns: set[str] = set()
+        for selected_component in selected_components:
+            normalized_selection = str(selected_component).strip()
+            selected_prefix = (
+                f"{component_label} {normalized_selection}"
+                if not normalized_selection.startswith(f"{component_label} #")
+                else normalized_selection
+            )
+            for col in energy_report_df.columns:
+                if col in seen_columns or not col.startswith(prefix):
+                    continue
+
+                if col == selected_prefix or col.startswith(f"{selected_prefix} "):
+                    comp_columns.append(col)
+                    seen_columns.add(col)
+                    continue
+
+                if (
+                    _format_component_value(component_label, col)
+                    == normalized_selection
+                ):
+                    comp_columns.append(col)
+                    seen_columns.add(col)
+
+    if allowed_component_ids is None:
+        return comp_columns
+
+    return [
+        col
+        for col in comp_columns
+        if _extract_component_id(component_label, col) in allowed_component_ids
+    ]
+
+
 def build_component_analysis(
     energy_report_df: pd.DataFrame,
     selection_filter: Iterable[str],
     component_label: str,
     value_col_name: str,
+    allowed_component_ids: set[str] | None = None,
 ) -> pd.DataFrame:
     """Build a long-format analysis table for a single component type.
 
@@ -109,6 +162,8 @@ def build_component_analysis(
         value_col_name:
             Name of the output column containing the selected component data
             (e.g., "battery", "chp", "ev").
+        allowed_component_ids:
+            Optional set of component IDs to include in the analysis.
 
     Returns:
         pd.DataFrame:
@@ -120,37 +175,12 @@ def build_component_analysis(
             If no matching columns are found, returns an empty DataFrame with
             the appropriate columns.
     """
-    prefix = f"{component_label} #"
-    comp_columns: list[str] = []
-
-    if any(str(x).lower() == "all" for x in selection_filter):
-        comp_columns = [
-            col for col in energy_report_df.columns if col.startswith(prefix)
-        ]
-    else:
-        seen_columns: set[str] = set()
-        for selected_component in selection_filter:
-            normalized_selection = str(selected_component).strip()
-            selected_prefix = (
-                f"{component_label} {normalized_selection}"
-                if not normalized_selection.startswith(f"{component_label} #")
-                else normalized_selection
-            )
-            for col in energy_report_df.columns:
-                if col in seen_columns or not col.startswith(prefix):
-                    continue
-
-                if col == selected_prefix or col.startswith(f"{selected_prefix} "):
-                    comp_columns.append(col)
-                    seen_columns.add(col)
-                    continue
-
-                if (
-                    _format_component_value(component_label, col)
-                    == normalized_selection
-                ):
-                    comp_columns.append(col)
-                    seen_columns.add(col)
+    comp_columns = _select_component_columns(
+        energy_report_df,
+        selection_filter,
+        component_label,
+        allowed_component_ids,
+    )
 
     if not comp_columns:
         return pd.DataFrame(columns=["timestamp", component_label, value_col_name])
@@ -174,7 +204,7 @@ def build_component_analysis(
     return analyse_df
 
 
-# pylint: disable=too-many-arguments, too-many-positional-arguments
+# pylint: disable=too-many-arguments, too-many-positional-arguments, too-many-locals
 def assemble_component_analysis(
     component_filter: list[str],
     component_key: str,
@@ -186,6 +216,8 @@ def assemble_component_analysis(
     value_col_name: str,
     invert_sign: bool = False,
     trunc_values: bool = False,
+    mcfg: MicrogridConfig | None = None,
+    component_id_source: Literal["meter", "inverter"] | None = None,
 ) -> tuple[pd.DataFrame, float, str]:
     """Assemble a component-level analysis table and compute its energy total.
 
@@ -224,6 +256,11 @@ def assemble_component_analysis(
         trunc_values:
             If ``True``, truncate values to zero (i.e., set negative values to zero)
             after scaling (dataframe values are kept unchanged).
+        mcfg:
+            Optional microgrid config used to resolve component IDs.
+        component_id_source:
+            Optional ID source selector. Use ``"meter"`` or ``"inverter"``.
+            Leave unset to keep the previous unrestricted behavior.
 
     Returns:
         - The long-form analysis DataFrame with energy values in kWh.
@@ -249,12 +286,23 @@ def assemble_component_analysis(
     ):
         return pd.DataFrame(), 0, filter_text
 
+    allowed_component_ids: set[str] | None = None
+    if mcfg is not None and component_id_source is not None:
+        try:
+            component_ids = mcfg.component_type_ids(
+                component_key, component_category=component_id_source
+            )
+        except ValueError:
+            component_ids = []
+        allowed_component_ids = {str(cid) for cid in component_ids or []}
+
     # Build Analysis
     analyse_df = build_component_analysis(
         energy_report_df,
         component_filter,
         component_label=component_label,
         value_col_name=value_col_name,
+        allowed_component_ids=allowed_component_ids,
     )
 
     analyse_df[value_col_name] = pd.to_numeric(

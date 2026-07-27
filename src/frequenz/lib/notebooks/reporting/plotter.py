@@ -142,6 +142,9 @@ def plot_time_series(
     shade_by_category: bool = False,
     secondary_y_cols: Sequence[str] | None = None,
     secondary_y_title: str | None = None,
+    date_range_selector_position: dict[str, object] | None = None,
+    legend_position: dict[str, object] | None = None,
+    top_margin: int = 140,
 ) -> go.Figure:
     """Create an interactive time-series plot using Plotly.
 
@@ -178,6 +181,14 @@ def plot_time_series(
         secondary_y_cols: Optional plotted columns to render on a secondary y-axis.
         secondary_y_title: Optional title for the secondary y-axis. Defaults to
             `secondary_y_cols` when not provided.
+        date_range_selector_position: Optional Plotly range selector positioning
+            options, for example `{"x": 0, "xanchor": "left", "y": 1.05,
+            "yanchor": "top"}`. Defaults to the current position above the plot.
+        legend_position: Optional Plotly legend positioning options, for example
+            `{"x": 0, "xanchor": "left", "y": 1.1, "yanchor": "top"}`.
+            Defaults to a wrapped horizontal legend below the date range selector.
+        top_margin: Top layout margin in pixels. Increase this when placing the
+            date range selector and legend above the plot.
 
     Returns:
         A Plotly Figure object representing the interactive time-series plot.
@@ -233,6 +244,24 @@ def plot_time_series(
     # Legend ranking independent of draw order
     rank_map = {c: i for i, c in enumerate(cols)}
 
+    range_selector_position = {
+        "x": 0,
+        "xanchor": "left",
+        "y": 1.2,
+        "yanchor": "top",
+    }
+    if date_range_selector_position:
+        range_selector_position.update(date_range_selector_position)
+
+    active_legend_position = {
+        "x": 0.0,
+        "xanchor": "left",
+        "y": 1.14,
+        "yanchor": "top",
+    }
+    if legend_position:
+        active_legend_position.update(legend_position)
+
     # Colour Mapping
     if shade_by_category and long_format_flag and category_col and len(cols) > 1:
         base_color = (color_dict or {}).get(category_col) or COLOR_DICT.get(
@@ -261,13 +290,13 @@ def plot_time_series(
         else:
             fill_mode = "tozeroy" if col in fill_cols else "none"
         line_color = color_map.get(col)
-        if col.lower() == "da_price":
-            line_color = COLOR_DICT.get("da_price", line_color)
+        if col.lower() == "day_ahead_price":
+            line_color = COLOR_DICT.get("day_ahead_price", line_color)
         fill_color = _with_alpha(line_color, 0.9)
         y_values = _coerce_numeric_series(pdf[col])
         hover_values = _coerce_numeric_series(raw_pdf[col])
         if col in secondary_col_set:
-            if col.lower() == "da_price":
+            if col.lower() == "day_ahead_price":
                 trace_unit = "EUR/MWh"
             else:
                 trace_unit = secondary_y_title or col
@@ -313,7 +342,7 @@ def plot_time_series(
         ),
         height=700,
         width=950,
-        margin=dict(t=120),
+        margin=dict(t=top_margin),
         xaxis=dict(
             type="date",
             rangeselector=dict(
@@ -328,10 +357,7 @@ def plot_time_series(
                 bgcolor="rgba(0,0,0,0)",  # Transparent background
                 activecolor="#2C7BE5",  # Highlight color for active button
                 font=dict(size=12),
-                x=0,
-                xanchor="left",
-                y=1.1,
-                yanchor="top",
+                **range_selector_position,
             ),
             rangeslider=dict(  # Add an interactive range slider below the x-axis
                 visible=True,
@@ -345,10 +371,10 @@ def plot_time_series(
             title=dict(text=legend_title),
             traceorder="normal",
             orientation="h",
-            x=0.0,
-            xanchor="left",
-            y=1.2,
-            yanchor="top",
+            entrywidth=80,
+            entrywidthmode="pixels",
+            font=dict(size=11),
+            **active_legend_position,
         ),
         xaxis_title=xaxis_title,
         yaxis_title=yaxis_title,
@@ -397,6 +423,9 @@ def plot_time_series_battery_usecase(
     stack_mode: BatteryUsecaseStackMode = "psc",
     secondary_y_cols: Sequence[str] | None = None,
     secondary_y_title: str | None = None,
+    date_range_selector_position: dict[str, object] | None = None,
+    legend_position: dict[str, object] | None = None,
+    top_margin: int = 140,
 ) -> go.Figure:
     """Plot a battery-usecase time series with charge/discharge overlays.
 
@@ -434,10 +463,24 @@ def plot_time_series_battery_usecase(
             battery charging built on the consumption line.
         secondary_y_cols: Optional columns to render on the secondary y-axis.
         secondary_y_title: Secondary y-axis label.
+        date_range_selector_position: Optional Plotly range selector positioning
+            options forwarded to :func:`plot_time_series`.
+        legend_position: Optional Plotly legend positioning options forwarded to
+            :func:`plot_time_series`. Defaults to the battery-usecase placement
+            above the plot.
+        top_margin: Top layout margin in pixels forwarded to
+            :func:`plot_time_series`.
 
     Returns:
         A Plotly figure for battery-usecase analysis.
     """
+    active_legend_position = {
+        "y": 1.28,
+        "yanchor": "top",
+    }
+    if legend_position:
+        active_legend_position.update(legend_position)
+
     plot_df, cols, fill_cols, dotted_cols, plot_order, secondary_y_cols, color_dict = (
         prepare_battery_usecase_plot(
             df,
@@ -474,10 +517,9 @@ def plot_time_series_battery_usecase(
         shade_by_category=shade_by_category,
         secondary_y_cols=secondary_y_cols,
         secondary_y_title=secondary_y_title,
-    )
-    fig.update_layout(
-        legend=dict(y=1.28, yanchor="top"),
-        margin=dict(t=145),
+        date_range_selector_position=date_range_selector_position,
+        legend_position=active_legend_position,
+        top_margin=top_margin,
     )
     source_df = plot_df if time_col is None else plot_df.set_index(time_col)
     add_battery_usecase_overlay_traces(

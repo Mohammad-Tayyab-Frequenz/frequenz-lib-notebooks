@@ -90,7 +90,7 @@ COLOR_DICT: dict[str, str] = {
     "Battery Charge": "rgba(236,0,140,1)",
     "Battery Discharge": "rgba(146,219,68,1)",
     "Netzbezug": "rgba(0,0,0,1)",
-    "da_price": "rgba(31, 119, 180, 1.0)",
+    "day_ahead_price": "rgba(31, 119, 180, 1.0)",
 }
 
 LINE_DASH_MAP: dict[str, str] = {

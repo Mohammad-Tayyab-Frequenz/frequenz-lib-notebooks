@@ -11,7 +11,8 @@
 ## New Features
 
 - Reporting utilities now support appending Assets API display names to single-component labels such as `PV #1179 - PV Roof Meter`.
+- Component analysis can now select either meter or inverter IDs from the microgrid config via `component_id_source`.
+- Time-series reporting plots now expose date range selector, legend position, and top margin options.
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->

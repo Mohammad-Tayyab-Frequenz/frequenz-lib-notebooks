@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import cast
 
 import pandas as pd
 import pytest
+from frequenz.gridpool import MicrogridConfig
 from pandas.testing import assert_frame_equal
 
 from frequenz.lib.notebooks.reporting.utils.column_mapper import ColumnMapper
@@ -19,6 +21,36 @@ from frequenz.lib.notebooks.reporting.utils.reporting_nb_functions import (
     build_overview_df,
     compute_energy_summary,
 )
+
+
+class _DummyComponentConfig:
+    """Minimal component config stub with id groups."""
+
+    def __init__(
+        self,
+        *,
+        meter: list[int] | None = None,
+        inverter: list[int] | None = None,
+    ) -> None:
+        self.meter = meter
+        self.inverter = inverter
+
+
+class _DummyMicrogridConfig:
+    """Minimal microgrid config stub exposing component type helpers."""
+
+    def __init__(self, ctype: dict[str, _DummyComponentConfig]) -> None:
+        self.ctype = ctype
+
+    def component_type_ids(
+        self, component_type: str, component_category: str | None = None
+    ) -> list[int]:
+        config = self.ctype.get(component_type)
+        if config is None:
+            raise ValueError(f"{component_type} not found in config.")
+        if component_category is None:
+            raise ValueError("component_category is required in this stub")
+        return cast(list[int], getattr(config, component_category, None)) or []
 
 
 def test_build_component_analysis_selects_all_components_and_melts() -> None:
@@ -96,6 +128,27 @@ def test_build_component_analysis_can_select_by_display_name() -> None:
     result = build_component_analysis(
         energy_report_df,
         selection_filter=["PV #1179 - PV Roof Meter"],
+        component_label="PV",
+        value_col_name="pv_asset_production",
+    )
+
+    assert result["PV"].tolist() == ["PV #1179 - PV Roof Meter"]
+    assert result["pv_asset_production"].tolist() == [1.2]
+
+
+def test_build_component_analysis_accepts_selection_generator() -> None:
+    """Generator selections should not be consumed before component matching."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "PV #1179 - PV Roof Meter": [1.2],
+            "PV #1188 - PV Yard Meter": [0.7],
+        }
+    )
+
+    result = build_component_analysis(
+        energy_report_df,
+        selection_filter=(item for item in ["PV #1179 - PV Roof Meter"]),
         component_label="PV",
         value_col_name="pv_asset_production",
     )
@@ -191,6 +244,100 @@ def test_assemble_component_analysis_coerces_object_values_to_numeric() -> None:
     assert analyse_df["PV-Production"].tolist() == [1.234]
     assert component_sum == 1.234
     assert filter_text == "#1179"
+
+
+def test_assemble_component_analysis_can_pick_inverter_ids() -> None:
+    """Analysis should select inverter-labelled columns when requested."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "PV #1133 - PV Meter": [-2.0],
+            "PV #1134 - PV Inverter": [-1.0],
+        }
+    )
+    mcfg = _DummyMicrogridConfig(
+        {"pv": _DummyComponentConfig(meter=[1133], inverter=[1134])}
+    )
+
+    analyse_df, component_sum, _ = assemble_component_analysis(
+        component_filter=["All"],
+        component_key="pv",
+        component_types=["pv"],
+        energy_report_df=energy_report_df,
+        timestep_hours=1.0,
+        mapper=ColumnMapper.from_default(locale="en"),
+        component_label="PV",
+        value_col_name="pv_asset_production",
+        invert_sign=True,
+        trunc_values=True,
+        mcfg=cast(MicrogridConfig, mcfg),
+        component_id_source="inverter",
+    )
+
+    assert analyse_df["PV"].tolist() == ["PV #1134 - PV Inverter"]
+    assert analyse_df["PV-Production"].tolist() == [1.0]
+    assert component_sum == 1.0
+
+
+def test_assemble_component_analysis_can_pick_meter_ids() -> None:
+    """Analysis should select meter-labelled columns when requested."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "Battery #1532 - Battery Meter": [5.0],
+            "Battery #1533 - Battery Inverter": [4.0],
+        }
+    )
+    mcfg = _DummyMicrogridConfig(
+        {"battery": _DummyComponentConfig(meter=[1532], inverter=[1533])}
+    )
+
+    analyse_df, component_sum, _ = assemble_component_analysis(
+        component_filter=["All"],
+        component_key="battery",
+        component_types=["battery"],
+        energy_report_df=energy_report_df,
+        timestep_hours=1.0,
+        mapper=ColumnMapper.from_default(locale="en"),
+        component_label="Battery",
+        value_col_name="battery_power_flow",
+        mcfg=cast(MicrogridConfig, mcfg),
+        component_id_source="meter",
+    )
+
+    assert analyse_df["Battery"].tolist() == ["Battery #1532 - Battery Meter"]
+    assert analyse_df["Battery Power Flow"].tolist() == [5.0]
+    assert component_sum == 5.0
+
+
+def test_assemble_component_analysis_returns_empty_when_id_source_has_no_matches() -> (
+    None
+):
+    """Selecting an id source with no matching columns should return empty output."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "PV #1134 - PV Inverter": [-1.0],
+        }
+    )
+    mcfg = _DummyMicrogridConfig({"pv": _DummyComponentConfig(meter=[1133])})
+
+    analyse_df, component_sum, filter_text = assemble_component_analysis(
+        component_filter=["All"],
+        component_key="pv",
+        component_types=["pv"],
+        energy_report_df=energy_report_df,
+        timestep_hours=1.0,
+        mapper=ColumnMapper.from_default(locale="en"),
+        component_label="PV",
+        value_col_name="pv_asset_production",
+        mcfg=cast(MicrogridConfig, mcfg),
+        component_id_source="meter",
+    )
+
+    assert analyse_df.empty
+    assert component_sum == 0
+    assert filter_text == "All"
 
 
 def test_build_overview_df_keeps_expected_optional_columns() -> None:

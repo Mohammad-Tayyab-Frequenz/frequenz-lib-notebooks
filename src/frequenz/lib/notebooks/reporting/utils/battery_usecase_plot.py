@@ -19,7 +19,7 @@ _DISPLAY_LABELS: dict[str, str] = {
     "grid_consumption": "Netzbezug",
     "grid_consumption_without_battery": "Netzbezug ohne Batterie",
     "day_ahead_price": "Day Ahead Preis",
-    "consumption": "Verbrauch",
+    "consumption": "MID Gesamtverbrauch",
     "battery_power_flow": "Batterie Leistungsfluss",
     "battery_discharge": "Batterie Entladung",
     "battery_charge": "Batterie Beladung",
@@ -207,7 +207,9 @@ def prepare_battery_usecase_plot(
             cols = [*cols, display_consumption]
         colors.setdefault(
             display_consumption,
-            COLOR_DICT.get("Verbrauch") or COLOR_DICT.get("Consumption") or "#6c757d",
+            COLOR_DICT.get(display_consumption)
+            or COLOR_DICT.get("Consumption")
+            or "#6c757d",
         )
 
     return df, cols, fill_cols, dotted_cols, plot_order, secondary_y_cols, colors
