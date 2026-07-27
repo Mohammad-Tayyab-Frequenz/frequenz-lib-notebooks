@@ -16,3 +16,5 @@
 
 ## Bug Fixes
 
+- Energy summaries now treat `grid_consumption` as import-only by clipping negative
+  values before aggregation, so grid feed-in no longer cancels out grid import.
