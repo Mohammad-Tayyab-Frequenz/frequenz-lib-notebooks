@@ -308,13 +308,17 @@ def label_component_columns(
     single_components = [str(c) for c in df.columns if str(c).isdigit()]
     available_types = set(mcfg.component_types())
 
-    # From config (empty set if missing)
+    # From config (empty set if missing). Union of all ID categories, since a
+    # component type can have meter, inverter, and component IDs configured
+    # at once, and each should be labeled if present in the DataFrame.
     def ids_if_available(t: str) -> set[str]:
-        return (
-            {str(x) for x in mcfg.component_type_ids(t)}
-            if t in available_types
-            else set()
-        )
+        if t not in available_types:
+            return set()
+        ids: set[str] = set()
+        for category in ("meter", "inverter", "component"):
+            category_ids = mcfg.component_type_ids(t, component_category=category)
+            ids.update(str(x) for x in category_ids or [])
+        return ids
 
     battery_ids = ids_if_available(column_battery)
     pv_ids = ids_if_available(column_pv)
