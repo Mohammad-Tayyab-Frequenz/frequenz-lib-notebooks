@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import sys
 import types
+from math import isclose
 
 import pandas as pd
 
-from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
 from frequenz.lib.notebooks.reporting.plotter import (  # noqa: E402
     plot_time_series_battery_usecase,
 )
+from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
 
 gridpool = sys.modules.setdefault(
     "frequenz.gridpool", types.ModuleType("frequenz.gridpool")
@@ -112,6 +113,43 @@ def test_plot_time_series_battery_usecase_colors_day_ahead_price() -> None:
     }
 
     assert traces_by_name["Day Ahead Preis"].line.color == COLOR_DICT["day_ahead_price"]
+
+
+def test_plot_time_series_battery_usecase_aligns_secondary_zero() -> None:
+    """Day-ahead price zero should align with primary zero."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-09 06:30:00",
+                    "2026-01-09 07:00:00",
+                    "2026-01-09 07:30:00",
+                ]
+            ),
+            "mid_consumption": [35.0, 21.0, 30.0],
+            "grid_consumption": [-50.0, 25.0, 150.0],
+            "battery_power_flow": [0.0, 0.0, 0.0],
+            "battery_discharge": [0.0, 0.0, 0.0],
+            "battery_charge": [0.0, 0.0, 0.0],
+            "day_ahead_price": [80.0, 95.0, 90.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=["grid_consumption", "mid_consumption", "day_ahead_price"],
+        secondary_y_cols=["day_ahead_price"],
+    )
+
+    primary_min, primary_max = fig.layout.yaxis.range
+    secondary_min, secondary_max = fig.layout.yaxis2.range
+    primary_zero_position = -primary_min / (primary_max - primary_min)
+    secondary_zero_position = -secondary_min / (secondary_max - secondary_min)
+
+    assert secondary_min < 0
+    assert secondary_max > 0
+    assert isclose(primary_zero_position, secondary_zero_position)
 
 
 def test_plot_time_series_battery_usecase_colors_negative_grid_feed_in() -> None:
