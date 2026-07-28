@@ -349,12 +349,11 @@ def test_build_overview_df_keeps_expected_optional_columns() -> None:
             "mid_consumption": [7.0],
             "grid_feed_in": [1.0],
             "pv_asset_production": [5.0],
-            "battery_power_flow": [-2.0],
             "extra_column": [99.0],
         }
     )
 
-    result = build_overview_df(energy_report_df, component_types=["pv", "battery"])
+    result = build_overview_df(energy_report_df, component_types=["pv", "wind"])
 
     expected = energy_report_df[
         [
@@ -363,11 +362,64 @@ def test_build_overview_df_keeps_expected_optional_columns() -> None:
             "mid_consumption",
             "grid_feed_in",
             "pv_asset_production",
-            "battery_power_flow",
         ]
-    ]
+    ].rename(columns={"pv_asset_production": "pv"})
 
     assert_frame_equal(result, expected)
+
+
+def test_build_overview_df_adds_battery_helpers() -> None:
+    """Battery output keeps requested columns and adds derived helpers."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "pv_asset_production": [12.0, 10.0],
+            "chp_asset_production": [2.0, 1.0],
+            "wind_asset_production": [3.0, 4.0],
+        }
+    )
+    result = build_overview_df(
+        energy_report_df,
+        component_types=["pv", "chp", "wind", "battery"],
+    )
+
+    expected = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "grid_consumption": [30.0, 25.0],
+            "mid_consumption": [35.0, 21.0],
+            "pv": [12.0, 10.0],
+            "chp": [2.0, 1.0],
+            "wind": [3.0, 4.0],
+            "battery_power_flow": [5.0, -4.0],
+            "peak_before_optimization": [35.0, 35.0],
+            "peak_after_optimization": [30.0, 30.0],
+            "battery_charge": [5.0, 0.0],
+            "battery_discharge": [0.0, -4.0],
+        }
+    )
+
+    assert_frame_equal(result, expected)
+
+
+def test_build_overview_df_battery_requires_configured_columns() -> None:
+    """Battery output should fail clearly when required columns are missing."""
+    energy_report_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00"]),
+            "mid_consumption": [35.0],
+            "grid_consumption": [30.0],
+        }
+    )
+
+    with pytest.raises(KeyError, match="battery_power_flow"):
+        build_overview_df(
+            energy_report_df,
+            component_types=["battery"],
+        )
 
 
 def test_compute_energy_summary_includes_rollups_and_percentages() -> None:
