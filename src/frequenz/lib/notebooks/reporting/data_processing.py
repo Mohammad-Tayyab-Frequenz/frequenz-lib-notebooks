@@ -14,8 +14,6 @@ Functions:
   - `create_energy_report_df`: Builds a normalized energy report table with
     unified naming, timezone conversion, grid import calculation, and
     component renaming based on a MicrogridConfig.
-  - `create_battery_usecase_df`: Builds the standardized battery-usecase table
-    used by the reporting plot helpers.
 
 Usage:
 -----
@@ -36,92 +34,6 @@ from frequenz.lib.notebooks.reporting.utils.helpers import (
     get_energy_report_columns,
     label_component_columns,
 )
-
-
-# pylint: disable=too-many-arguments, too-many-locals
-def create_battery_usecase_df(
-    energy_report_df: pd.DataFrame,
-    *,
-    timestamp_col: str = "timestamp",
-    consumption_col: str = "mid_consumption",
-    grid_consumption_col: str = "grid_consumption",
-    battery_col: str = "battery_power_flow",
-    pv_col: str | None = "pv_asset_production",
-    chp_col: str | None = "chp_asset_production",
-    wind_col: str | None = "wind_asset_production",
-) -> pd.DataFrame:
-    """Create a standardized battery-usecase DataFrame.
-
-    Selects the battery-usecase input columns from the source DataFrame, renames
-    them to the standardized reporting schema, keeps the site consumption
-    baseline used for plotting, computes reference peak lines, and splits
-    battery power flow into charging and discharging series.
-
-    Args:
-        energy_report_df: Reporting DataFrame containing the source columns for
-            timestamp, consumption, grid consumption, and battery power flow.
-        timestamp_col: Column name in `energy_report_df` containing the
-            timestamps.
-        consumption_col: Column name in `energy_report_df` containing
-            site consumption.
-        grid_consumption_col: Column name in `energy_report_df` containing
-            grid consumption with battery support.
-        battery_col: Column name in `energy_report_df` containing
-            battery power flow.
-        pv_col: Optional column name in `energy_report_df` containing
-            PV production to preserve in the standardized output when present.
-        chp_col: Optional column name in `energy_report_df` containing
-            CHP production to preserve in the standardized output when present.
-        wind_col: Optional column name in `energy_report_df` containing
-            wind production to preserve in the standardized output when present.
-
-    Returns:
-        The battery-usecase DataFrame with derived helper columns for plotting
-        and analysis.
-
-    Raises:
-        KeyError: If required columns are missing from the input DataFrame.
-    """
-    required_cols = [timestamp_col, consumption_col, grid_consumption_col, battery_col]
-    missing_cols = [col for col in required_cols if col not in energy_report_df.columns]
-    if missing_cols:
-        raise KeyError(
-            "Missing required columns in energy_report_df: "
-            + ", ".join(sorted(missing_cols))
-        )
-
-    selected_cols = list(required_cols)
-    rename_map = {
-        timestamp_col: "timestamp",
-        consumption_col: "consumption",
-        grid_consumption_col: "grid_consumption",
-        battery_col: "battery_power_flow",
-    }
-    optional_production_columns = {
-        pv_col: "pv",
-        chp_col: "chp",
-        wind_col: "wind",
-    }
-    for source_col, target_col in optional_production_columns.items():
-        if source_col and source_col in energy_report_df.columns:
-            selected_cols.append(source_col)
-            rename_map[source_col] = target_col
-
-    battery_usecase_df = energy_report_df[selected_cols].rename(columns=rename_map)
-    battery_usecase_df["peak_before_optimization"] = battery_usecase_df[
-        "consumption"
-    ].max()
-    battery_usecase_df["peak_after_optimization"] = battery_usecase_df[
-        "grid_consumption"
-    ].max()
-    battery_usecase_df["battery_charge"] = battery_usecase_df[
-        "battery_power_flow"
-    ].clip(lower=0)
-    battery_usecase_df["battery_discharge"] = battery_usecase_df[
-        "battery_power_flow"
-    ].clip(upper=0)
-
-    return battery_usecase_df
 
 
 # pylint: disable=too-many-arguments, too-many-locals

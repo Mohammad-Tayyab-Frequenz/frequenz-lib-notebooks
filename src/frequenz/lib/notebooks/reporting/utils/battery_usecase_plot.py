@@ -182,6 +182,10 @@ def prepare_battery_usecase_plot(
     colors.setdefault(
         _DISPLAY_LABELS["battery_charge"], COLOR_DICT["Battery Discharge"]
     )
+    colors.setdefault(
+        _DISPLAY_LABELS["day_ahead_price"],
+        COLOR_DICT["day_ahead_price"],
+    )
     for peak_col in peak_columns:
         colors.setdefault(_DISPLAY_LABELS[peak_col], COLOR_DICT["peak"])
 
@@ -506,6 +510,7 @@ def _move_grid_traces_to_top(fig: go.Figure) -> None:
     top_names = {
         _DISPLAY_LABELS["grid_consumption"],
         _DISPLAY_LABELS["consumption"],
+        "Netz Einspeisung",
     }
     traces = list(fig.data)
     base_traces = [

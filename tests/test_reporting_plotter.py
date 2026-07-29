@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import sys
 import types
+from math import isclose
 
 import pandas as pd
 
 from frequenz.lib.notebooks.reporting.plotter import (  # noqa: E402
     plot_time_series_battery_usecase,
 )
+from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
 
 gridpool = sys.modules.setdefault(
     "frequenz.gridpool", types.ModuleType("frequenz.gridpool")
@@ -85,12 +87,113 @@ def test_plot_time_series_battery_usecase_accepts_legacy_german_columns() -> Non
     assert "Lastspitze nach optimierung" in trace_names
 
 
-def test_plot_time_series_battery_usecase_adds_chp_and_wind_to_overlay_stacks() -> None:
-    """CHP and wind should join a production stack anchored on consumption."""
+def test_plot_time_series_battery_usecase_colors_day_ahead_price() -> None:
+    """Day-ahead price should use the adapter default after display-name mapping."""
     df = pd.DataFrame(
         {
             "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
-            "consumption": [35.0, 21.0],
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "battery_discharge": [5.0, 0.0],
+            "battery_charge": [0.0, -4.0],
+            "pv": [12.0, 10.0],
+            "day_ahead_price": [80.0, 95.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=["grid_consumption", "mid_consumption", "pv", "day_ahead_price"],
+        secondary_y_cols=["day_ahead_price"],
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert traces_by_name["Day Ahead Preis"].line.color == COLOR_DICT["day_ahead_price"]
+
+
+def test_plot_time_series_battery_usecase_aligns_secondary_zero() -> None:
+    """Day-ahead price zero should align with primary zero."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-09 06:30:00",
+                    "2026-01-09 07:00:00",
+                    "2026-01-09 07:30:00",
+                ]
+            ),
+            "mid_consumption": [35.0, 21.0, 30.0],
+            "grid_consumption": [-50.0, 25.0, 150.0],
+            "battery_power_flow": [0.0, 0.0, 0.0],
+            "battery_discharge": [0.0, 0.0, 0.0],
+            "battery_charge": [0.0, 0.0, 0.0],
+            "day_ahead_price": [80.0, 95.0, 90.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=["grid_consumption", "mid_consumption", "day_ahead_price"],
+        secondary_y_cols=["day_ahead_price"],
+    )
+
+    primary_min, primary_max = fig.layout.yaxis.range
+    secondary_min, secondary_max = fig.layout.yaxis2.range
+    primary_zero_position = -primary_min / (primary_max - primary_min)
+    secondary_zero_position = -secondary_min / (secondary_max - secondary_min)
+
+    assert secondary_min < 0
+    assert secondary_max > 0
+    assert isclose(primary_zero_position, secondary_zero_position)
+
+
+def test_plot_time_series_battery_usecase_colors_negative_grid_feed_in() -> None:
+    """Negative Netzbezug values should be overlaid as Netz Einspeisung."""
+    feed_in_color = "rgba(46,125,50,1)"
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-09 06:30:00",
+                    "2026-01-09 07:00:00",
+                    "2026-01-09 07:30:00",
+                ]
+            ),
+            "mid_consumption": [10.0, 8.0, 11.0],
+            "grid_consumption": [4.0, -3.0, -2.0],
+            "battery_power_flow": [0.0, 0.0, 0.0],
+            "battery_discharge": [0.0, 0.0, 0.0],
+            "battery_charge": [0.0, 0.0, 0.0],
+        }
+    )
+
+    fig = plot_time_series_battery_usecase(
+        df,
+        time_col="timestamp",
+        cols=["grid_consumption", "mid_consumption"],
+        color_dict={"Netz Einspeisung": feed_in_color},
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert traces_by_name["Netz Einspeisung"].line.color == feed_in_color
+    feed_in_y = list(traces_by_name["Netz Einspeisung"].y)
+    assert pd.isna(feed_in_y[0])
+    assert feed_in_y[1:] == [-3.0, -2.0]
+
+
+def test_plot_time_series_battery_usecase_adds_chp_and_wind_to_overlay_stacks() -> None:
+    """CHP and wind should join a production stack anchored on MID consumption."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
             "grid_consumption": [30.0, 25.0],
             "battery_power_flow": [5.0, -4.0],
             "battery_discharge": [5.0, 0.0],
@@ -105,7 +208,7 @@ def test_plot_time_series_battery_usecase_adds_chp_and_wind_to_overlay_stacks() 
         df,
         time_col="timestamp",
         cols=[
-            "consumption",
+            "mid_consumption",
             "grid_consumption",
             "battery_discharge",
             "battery_charge",

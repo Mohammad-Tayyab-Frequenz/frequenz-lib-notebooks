@@ -31,6 +31,88 @@ def _coerce_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(as_str, errors="coerce")
 
 
+def _trace_y_values(trace: go.Scatter) -> pd.Series:
+    """Return numeric y values for a Plotly trace."""
+    if trace.y is None:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(pd.Series(trace.y), errors="coerce").dropna()
+
+
+def _axis_y_range(fig: go.Figure, axis_name: str) -> tuple[float, float] | None:
+    """Return the numeric data range for traces attached to a y-axis."""
+    values = []
+    for trace in fig.data:
+        if getattr(trace, "visible", None) is False:
+            continue
+        trace_axis = getattr(trace, "yaxis", None) or "y"
+        if trace_axis != axis_name:
+            continue
+        trace_values = _trace_y_values(trace)
+        if not trace_values.empty:
+            values.append(trace_values)
+
+    if not values:
+        return None
+
+    axis_values = pd.concat(values, ignore_index=True)
+    if axis_values.empty:
+        return None
+    return float(axis_values.min()), float(axis_values.max())
+
+
+def _padded_range(y_min: float, y_max: float) -> tuple[float, float]:
+    """Return a lightly padded range that keeps flat lines visible."""
+    if y_min == y_max:
+        pad = abs(y_min) * 0.05 or 1.0
+    else:
+        pad = (y_max - y_min) * 0.05
+    return y_min - pad, y_max + pad
+
+
+def _secondary_range_aligned_to_primary_zero(
+    primary_range: tuple[float, float],
+    secondary_range: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Return a secondary range with its zero aligned to primary zero."""
+    primary_min, primary_max = primary_range
+    if primary_min >= 0 or primary_max <= 0:
+        return None
+
+    zero_position = -primary_min / (primary_max - primary_min)
+    if zero_position <= 0 or zero_position >= 1:
+        return None
+
+    secondary_min, secondary_max = secondary_range
+    secondary_min, secondary_max = _padded_range(secondary_min, secondary_max)
+
+    upper = max(secondary_max, 0.0)
+    lower_magnitude = max(-secondary_min, 0.0)
+    upper = max(upper, lower_magnitude * (1 - zero_position) / zero_position)
+    lower_magnitude = zero_position / (1 - zero_position) * upper
+
+    return -lower_magnitude, upper
+
+
+def _align_secondary_yaxis_zero(fig: go.Figure) -> None:
+    """Align the secondary y-axis zero tick with the primary y-axis zero tick."""
+    primary_data_range = _axis_y_range(fig, "y")
+    secondary_data_range = _axis_y_range(fig, "y2")
+    if primary_data_range is None or secondary_data_range is None:
+        return
+
+    primary_range = _padded_range(*primary_data_range)
+    secondary_range = _secondary_range_aligned_to_primary_zero(
+        primary_range, secondary_data_range
+    )
+    if secondary_range is None:
+        return
+
+    fig.update_layout(
+        yaxis={"range": list(primary_range)},
+        yaxis2={"range": list(secondary_range)},
+    )
+
+
 def _split_battery_power_flow(
     df: pd.DataFrame,
     cols: list[str],
@@ -144,7 +226,8 @@ def plot_time_series(
     secondary_y_title: str | None = None,
     date_range_selector_position: dict[str, object] | None = None,
     legend_position: dict[str, object] | None = None,
-    top_margin: int = 140,
+    legend_max_height: int | float | None = 70,
+    top_margin: int = 160,
 ) -> go.Figure:
     """Create an interactive time-series plot using Plotly.
 
@@ -187,6 +270,11 @@ def plot_time_series(
         legend_position: Optional Plotly legend positioning options, for example
             `{"x": 0, "xanchor": "left", "y": 1.1, "yanchor": "top"}`.
             Defaults to a wrapped horizontal legend below the date range selector.
+            Values passed here take precedence over `legend_max_height`.
+        legend_max_height: Maximum legend height in pixels, or a layout-height
+            ratio when less than or equal to 1. Plotly shows an independent
+            legend scrollbar when entries exceed this height. Set to None to use
+            Plotly's default legend height.
         top_margin: Top layout margin in pixels. Increase this when placing the
             date range selector and legend above the plot.
 
@@ -247,7 +335,7 @@ def plot_time_series(
     range_selector_position = {
         "x": 0,
         "xanchor": "left",
-        "y": 1.2,
+        "y": 1.25,
         "yanchor": "top",
     }
     if date_range_selector_position:
@@ -256,9 +344,11 @@ def plot_time_series(
     active_legend_position = {
         "x": 0.0,
         "xanchor": "left",
-        "y": 1.14,
+        "y": 1.18,
         "yanchor": "top",
     }
+    if legend_max_height is not None:
+        active_legend_position["maxheight"] = legend_max_height
     if legend_position:
         active_legend_position.update(legend_position)
 
@@ -329,6 +419,38 @@ def plot_time_series(
                 showlegend=True,
             )
         )
+        if col in {"grid_consumption", "Netzbezug"}:
+            grid_feed_in = y_values.where(y_values < 0)
+            if grid_feed_in.notna().any():
+                feed_in_name = "Netz Einspeisung"
+                feed_in_color = (
+                    (color_dict or {}).get(feed_in_name)
+                    or COLOR_DICT.get(feed_in_name)
+                    or line_color
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=pdf.index,
+                        y=grid_feed_in,
+                        mode="lines",
+                        name=feed_in_name,
+                        customdata=pd.DataFrame({"raw": hover_values}).to_numpy(),
+                        hovertemplate=(
+                            f"<b>{feed_in_name}</b>: %{{customdata[0]}} "
+                            f"{trace_unit}<extra></extra>"
+                        ),
+                        yaxis="y2" if col in secondary_col_set else "y",
+                        line=dict(
+                            color=feed_in_color,
+                            shape="hv",
+                            dash=LINE_DASH_MAP.get(feed_in_name, "solid"),
+                            width=1,
+                        ),
+                        fill="none",
+                        legendrank=rank_map.get(col, 10_000 + i) + 1,
+                        showlegend=True,
+                    )
+                )
 
     # Update the figure layout: titles, legend, axes, and interactive controls
     fig.update_layout(
@@ -341,8 +463,8 @@ def plot_time_series(
             font=dict(size=22),
         ),
         height=700,
-        width=950,
-        margin=dict(t=top_margin),
+        width=900,
+        margin=dict(t=top_margin, autoexpand=False),
         xaxis=dict(
             type="date",
             rangeselector=dict(
@@ -371,8 +493,6 @@ def plot_time_series(
             title=dict(text=legend_title),
             traceorder="normal",
             orientation="h",
-            entrywidth=80,
-            entrywidthmode="pixels",
             font=dict(size=11),
             **active_legend_position,
         ),
@@ -394,6 +514,7 @@ def plot_time_series(
         fig.update_layout(
             yaxis2=yaxis2_updates,
         )
+        _align_secondary_yaxis_zero(fig)
     return fig
 
 
@@ -418,14 +539,15 @@ def plot_time_series_battery_usecase(
     battery_charging: str = "battery_discharge",
     battery_discharging: str = "battery_charge",
     pv_col: str = "pv",
-    consumption_col: str = "consumption",
+    consumption_col: str = "mid_consumption",
     grid_consumption: str = "grid_consumption",
     stack_mode: BatteryUsecaseStackMode = "psc",
     secondary_y_cols: Sequence[str] | None = None,
     secondary_y_title: str | None = None,
     date_range_selector_position: dict[str, object] | None = None,
     legend_position: dict[str, object] | None = None,
-    top_margin: int = 140,
+    legend_max_height: int | float | None = 70,
+    top_margin: int = 160,
 ) -> go.Figure:
     """Plot a battery-usecase time series with charge/discharge overlays.
 
@@ -453,7 +575,8 @@ def plot_time_series_battery_usecase(
         battery_charging: Column containing the battery charging series.
         battery_discharging: Column containing the battery discharging series.
         pv_col: Column containing PV production values.
-        consumption_col: Column containing site consumption.
+        consumption_col: Column containing site consumption. Defaults to
+            ``"mid_consumption"``, matching the canonical energy report output.
         grid_consumption: Column containing grid consumption with battery
             support.
         stack_mode: Overlay style selector. ``"psc"`` uses the
@@ -466,21 +589,16 @@ def plot_time_series_battery_usecase(
         date_range_selector_position: Optional Plotly range selector positioning
             options forwarded to :func:`plot_time_series`.
         legend_position: Optional Plotly legend positioning options forwarded to
-            :func:`plot_time_series`. Defaults to the battery-usecase placement
-            above the plot.
+            :func:`plot_time_series`.
+        legend_max_height: Maximum legend height forwarded to
+            :func:`plot_time_series`. Plotly shows an independent legend
+            scrollbar when entries exceed this height.
         top_margin: Top layout margin in pixels forwarded to
             :func:`plot_time_series`.
 
     Returns:
         A Plotly figure for battery-usecase analysis.
     """
-    active_legend_position = {
-        "y": 1.28,
-        "yanchor": "top",
-    }
-    if legend_position:
-        active_legend_position.update(legend_position)
-
     plot_df, cols, fill_cols, dotted_cols, plot_order, secondary_y_cols, color_dict = (
         prepare_battery_usecase_plot(
             df,
@@ -518,7 +636,8 @@ def plot_time_series_battery_usecase(
         secondary_y_cols=secondary_y_cols,
         secondary_y_title=secondary_y_title,
         date_range_selector_position=date_range_selector_position,
-        legend_position=active_legend_position,
+        legend_position=legend_position,
+        legend_max_height=legend_max_height,
         top_margin=top_margin,
     )
     source_df = plot_df if time_col is None else plot_df.set_index(time_col)
@@ -529,6 +648,8 @@ def plot_time_series_battery_usecase(
         yaxis_title=yaxis_title,
         stack_mode=stack_mode,
     )
+    if secondary_y_cols:
+        _align_secondary_yaxis_zero(fig)
     return fig
 
 

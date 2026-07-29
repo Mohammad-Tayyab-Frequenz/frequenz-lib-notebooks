@@ -337,32 +337,31 @@ def assemble_component_analysis(
 
 
 def build_overview_df(
-    energy_report_df: pd.DataFrame, component_types: Iterable[str]
+    energy_report_df: pd.DataFrame,
+    component_types: Iterable[str],
 ) -> pd.DataFrame:
-    """Return a compact overview subset of the energy report DataFrame.
+    """Build an overview table from a canonical energy report DataFrame.
 
-    This function extracts a core set of site-level energy columns together with
-    optional production-related columns, depending on which component types are
-    present (e.g., PV, battery, wind, CHP). Missing columns are ignored safely.
+    The output always starts with the site-level columns ``timestamp``,
+    ``grid_consumption``, ``mid_consumption``, and ``grid_feed_in`` when they
+    are available in ``energy_report_df``. It then appends component-level
+    aggregate columns for the requested component types:
+    ``pv_asset_production``, ``chp_asset_production``,
+    ``wind_asset_production``, and ``battery_power_flow``.
+
+    If ``battery`` is present, the output is extended with battery plotting
+    helpers derived from the selected columns: ``peak_before_optimization``,
+    ``peak_after_optimization``, ``battery_charge``, and
+    ``battery_discharge``.
 
     Args:
-        energy_report_df:
-            The full energy report DataFrame containing timestamped power data and
-            optionally component-specific production/throughput columns.
-        component_types:
-            Iterable of component type identifiers (e.g., {"pv", "battery", "wind"}).
-            Only columns corresponding to these component types are included.
+        energy_report_df: Canonical energy report DataFrame.
+        component_types: Component type identifiers to include, e.g.
+            ``{"pv", "battery", "wind"}``.
 
     Returns:
-        pd.DataFrame:
-            A subset of `energy_report_df` that contains:
-                - Base columns: "timestamp", "grid_consumption",
-                "mid_consumption", "grid_feed_in"
-                - Optional component-specific columns such as
-                "pv_asset_production", "battery_power_flow",
-                "chp_asset_production", "wind_asset_production"
-
-            Columns that do not exist in the input DataFrame are silently skipped.
+        A copy of the selected overview columns plus battery helper columns when
+        ``battery`` is present.
     """
     base_cols = [
         "timestamp",
@@ -388,7 +387,20 @@ def build_overview_df(
     # Safe selection: avoid KeyError if a column is missing
     cols = list(pd.Index(cols).intersection(energy_report_df.columns, sort=False))
 
-    return energy_report_df[cols]
+    overview_df = energy_report_df[cols].copy()
+    overview_df.columns = overview_df.columns.str.replace(
+        "_asset_production", "", regex=False
+    )
+
+    if "battery" in component_types:
+        overview_df["peak_before_optimization"] = overview_df["mid_consumption"].max()
+        overview_df["peak_after_optimization"] = overview_df["grid_consumption"].max()
+        overview_df["battery_charge"] = overview_df["battery_power_flow"].clip(lower=0)
+        overview_df["battery_discharge"] = overview_df["battery_power_flow"].clip(
+            upper=0
+        )
+
+    return overview_df
 
 
 # pylint: disable=too-many-locals
