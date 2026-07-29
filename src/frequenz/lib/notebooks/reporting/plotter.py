@@ -113,6 +113,11 @@ def _align_secondary_yaxis_zero(fig: go.Figure) -> None:
     )
 
 
+def _legend_supports_property(name: str) -> bool:
+    """Return whether the installed Plotly legend schema supports a property."""
+    return name in getattr(go.layout.Legend(), "_valid_props", set())
+
+
 def _split_battery_power_flow(
     df: pd.DataFrame,
     cols: list[str],
@@ -347,7 +352,7 @@ def plot_time_series(
         "y": 1.18,
         "yanchor": "top",
     }
-    if legend_max_height is not None:
+    if legend_max_height is not None and _legend_supports_property("maxheight"):
         active_legend_position["maxheight"] = legend_max_height
     if legend_position:
         active_legend_position.update(legend_position)
