@@ -11,6 +11,9 @@
 - The dedicated `create_battery_usecase_df()` helper has been removed. Use
   `build_overview_df(..., component_types=[..., "battery"])` to build overview
   data with battery plotting helper columns.
+- The minimum supported `frequenz-gridpool` version is now `0.6.3`, and
+  dependency ranges for `types-pyyaml`, `pyyaml`, and `entsoe-py` now include
+  upper bounds.
 
 ## New Features
 
