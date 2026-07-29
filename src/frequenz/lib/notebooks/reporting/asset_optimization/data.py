@@ -7,11 +7,13 @@ import logging
 import os
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from frequenz.gridpool import MicrogridConfig
+from frequenz.client.assets import AssetsApiClient
+from frequenz.gridpool import load_configs
 
 from frequenz.data.microgrid import MicrogridData
 from frequenz.lib.notebooks.dayahead import fetch_day_ahead_prices
@@ -77,15 +79,13 @@ def _credentials() -> tuple[str, str]:
 
 async def init_microgrid_data(
     *,
-    microgrid_config_file: str | None = None,
-    microgrid_config_dir: str | None = None,
+    microgrid_config_files: str | Path | list[str | Path] | None = None,
     dotenv_path: str | Sequence[str] | None = None,
 ) -> MicrogridData:
     """Load MicrogridData instance using environment variables.
 
     Args:
-        microgrid_config_file: Path to a microgrid configuration file.
-        microgrid_config_dir: Directory containing microgrid configuration files.
+        microgrid_config_files: Path, or paths, to microgrid configuration files.
         dotenv_path: Optional path, or paths, to environment variable files. They
             are loaded in order and override both earlier files and the current
             environment, so list the most specific file last.
@@ -99,33 +99,18 @@ async def init_microgrid_data(
     service_address = os.environ["REPORTING_API_URL"]
     api_key, api_secret = _credentials()
 
-    assets_url = os.environ.get("ASSETS_API_URL")
-    if not assets_url:
-        _logger.warning(
-            "ASSETS_API_URL is not set. Falling back to static microgrid configs."
+    assets_client = AssetsApiClient(
+        os.environ["ASSETS_API_URL"],
+        auth_key=api_key or None,
+        sign_secret=api_secret or None,
+    )
+    try:
+        mcfg = await load_configs(
+            default_files=microgrid_config_files,
+            assets_client=assets_client,
         )
-        mcfg = MicrogridConfig.load_configs(
-            microgrid_config_files=microgrid_config_file,
-            microgrid_config_dir=microgrid_config_dir,
-        )
-    else:
-        try:
-            mcfg = await MicrogridConfig.load_configs_with_formulas(
-                assets_url=assets_url,
-                assets_auth_key=api_key,
-                assets_sign_secret=api_secret,
-                microgrid_config_files=microgrid_config_file,
-                microgrid_config_dir=microgrid_config_dir,
-            )
-        except RuntimeError:
-            _logger.warning(
-                "Could not run async formula loading in current context. "
-                "Falling back to loading static microgrid configs."
-            )
-            mcfg = MicrogridConfig.load_configs(
-                microgrid_config_files=microgrid_config_file,
-                microgrid_config_dir=microgrid_config_dir,
-            )
+    except RuntimeError:
+        _logger.warning("Could not run async formula loading in current context. ")
 
     return MicrogridData(
         server_url=service_address,
