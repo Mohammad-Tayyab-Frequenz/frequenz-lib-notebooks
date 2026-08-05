@@ -31,6 +31,7 @@ _DISPLAY_LABELS: dict[str, str] = {
 }
 
 _PEAK_COLUMNS = ["peak_before_optimization", "peak_after_optimization"]
+_EXCLUDED_USECASE_COLUMNS = {"battery_soc_pct", "soc"}
 
 _REQUIRED_PRODUCTION_OVERLAY_COLUMNS = ["grid_consumption"]
 _REQUIRED_BATTERY_OVERLAY_COLUMNS = [
@@ -87,7 +88,7 @@ def _resolve_battery_usecase_color(color_dict: dict[str, str], name: str) -> str
     return color_dict.get(name) or COLOR_DICT.get(name) or COLOR_DICT["PV"]
 
 
-# pylint: disable=too-many-arguments, too-many-locals
+# pylint: disable=too-many-arguments, too-many-locals, too-many-statements
 def prepare_battery_usecase_plot(
     df: pd.DataFrame,
     *,
@@ -138,6 +139,11 @@ def prepare_battery_usecase_plot(
                 result.append(item)
         return result
 
+    def _exclude_usecase_columns(seq: list[str] | None) -> list[str] | None:
+        if seq is None:
+            return None
+        return [c for c in seq if c not in _EXCLUDED_USECASE_COLUMNS]
+
     df = df.rename(columns=normalize_map)
     cols = _rename(cols, normalize_map)
     fill_cols = _rename(fill_cols, normalize_map)
@@ -146,6 +152,13 @@ def prepare_battery_usecase_plot(
     secondary_y_cols = _rename(
         list(secondary_y_cols) if secondary_y_cols is not None else None, normalize_map
     )
+
+    df = df.drop(columns=list(_EXCLUDED_USECASE_COLUMNS & set(df.columns)))
+    cols = _exclude_usecase_columns(cols)
+    fill_cols = _exclude_usecase_columns(fill_cols)
+    dotted_cols = _exclude_usecase_columns(dotted_cols)
+    plot_order = _exclude_usecase_columns(plot_order)
+    secondary_y_cols = _exclude_usecase_columns(secondary_y_cols)
 
     for canonical_name in ("pv", "chp", "wind"):
         if canonical_name in df.columns:
