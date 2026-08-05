@@ -43,6 +43,15 @@ columns:
       en: "Total amount of energy charged into and discharged from the battery."
       de: "Gesamtmenge der Energie, die in die Batterie geladen und aus ihr entladen wurde."
 
+  battery_soc_pct:
+    raw: "soc"
+    display:
+      en: "Battery SOC (%)"
+      de: "Batterie SOC %"
+    description:
+      en: "Battery state of charge in percent."
+      de: "Ladezustand der Batterie in Prozent."
+
 # Computed metrics
   pv_asset_production:
     raw: "pv_asset_production"
