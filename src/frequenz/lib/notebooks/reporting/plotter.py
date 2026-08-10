@@ -752,8 +752,8 @@ def plot_time_series_battery_soc_and_usecase(
 
     fig.update_layout(
         height=650,
-        width=800,
-        margin=dict(r=200),
+        width=950,
+        margin=dict(r=180),
         yaxis2=usecase_yaxis2,
         updatemenus=[
             {
@@ -769,7 +769,8 @@ def plot_time_series_battery_soc_and_usecase(
                             {"visible": visible_usecase},
                             {"yaxis2": usecase_yaxis2},
                         ],
-                        "label": "Battery Usecase View",
+                        # "label": "Battery Usecase<br>View",
+                        "label": "Gesamt<br>Energieprofil",
                         "method": "update",
                     },
                     {
@@ -777,7 +778,7 @@ def plot_time_series_battery_soc_and_usecase(
                             {"visible": visible_soc},
                             {"yaxis2": soc_yaxis2},
                         ],
-                        "label": "Battery SOC plot",
+                        "label": "Batterie<br>Ladezustand",
                         "method": "update",
                     },
                 ],
