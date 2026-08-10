@@ -2,16 +2,16 @@
 
 ## Summary
 
-<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
-<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- Added `plot_time_series_battery_soc` to plot battery charging, discharging,
+  and SOC on a secondary y-axis.
+- Added `plot_time_series_battery_soc_and_usecase` to switch between the battery
+  SOC plot and the battery use-case view in one Plotly figure.
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->

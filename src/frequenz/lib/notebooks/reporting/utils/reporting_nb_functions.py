@@ -347,7 +347,8 @@ def build_overview_df(
     are available in ``energy_report_df``. It then appends component-level
     aggregate columns for the requested component types:
     ``pv_asset_production``, ``chp_asset_production``,
-    ``wind_asset_production``, and ``battery_power_flow``.
+    ``wind_asset_production``, ``battery_power_flow``, and
+    ``battery_soc_pct`` when present.
 
     If ``battery`` is present, the output is extended with battery plotting
     helpers derived from the selected columns: ``peak_before_optimization``,
@@ -368,6 +369,7 @@ def build_overview_df(
         "grid_consumption",
         "mid_consumption",
         "grid_feed_in",
+        "day_ahead_price",
     ]
 
     optional_cols = {
@@ -375,7 +377,7 @@ def build_overview_df(
         "chp": ["chp_asset_production"],
         # "ev": ["ev_charging_load"],
         "wind": ["wind_asset_production"],
-        "battery": ["battery_power_flow"],
+        "battery": ["battery_power_flow", "battery_soc_pct"],
     }
 
     # Collect columns in order

@@ -48,6 +48,7 @@ def create_energy_report_df(
     fill_missing_values: bool = True,
     aggregated_component_config: AggregatedComponentConfig | None = None,
     component_display_names: dict[str, str] | None = None,
+    battery_soc_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Create a normalized Energy Report DataFrame with selected columns.
 
@@ -72,6 +73,9 @@ def create_energy_report_df(
         component_display_names: Optional mapping from numeric component IDs to
             display names fetched from the Assets API, typically passed in from
             notebook code after awaiting ``get_meter_display_names()``.
+        battery_soc_df: Optional SOC data returned by ``MicrogridData.soc()``.
+            When battery is present and ``mcfg`` has a ``BATTERY_SOC_PCT``
+            formula, its ``battery`` column is added as ``battery_soc_pct``.
 
     Returns:
         The Energy Report DataFrame with standardized and selected columns.
@@ -85,6 +89,10 @@ def create_energy_report_df(
     if isinstance(energy_report_df.index, (pd.DatetimeIndex, pd.PeriodIndex)):
         if "timestamp" not in energy_report_df.columns:
             energy_report_df = energy_report_df.reset_index(names="timestamp")
+
+    include_battery_soc = _has_battery_soc_formula(component_types, mcfg)
+    if include_battery_soc:
+        energy_report_df = _add_battery_soc_column(energy_report_df, battery_soc_df)
 
     # Add Energy flow columns
     energy_report_df = add_energy_flows(
@@ -127,6 +135,8 @@ def create_energy_report_df(
     energy_report_df_cols = get_energy_report_columns(
         component_types, single_components
     )
+    if include_battery_soc and "battery_soc_pct" in energy_report_df.columns:
+        energy_report_df_cols.append("battery_soc_pct")
 
     # Select only the relevant columns
     energy_report_df = energy_report_df[energy_report_df_cols]
@@ -140,3 +150,40 @@ def create_energy_report_df(
         )
 
     return energy_report_df
+
+
+def _has_battery_soc_formula(component_types: list[str], mcfg: MicrogridConfig) -> bool:
+    """Return whether the report should include battery SOC."""
+    if "battery" not in component_types:
+        return False
+    try:
+        mcfg.formula("battery", "BATTERY_SOC_PCT")
+    except (AttributeError, ValueError):
+        return False
+    return True
+
+
+def _add_battery_soc_column(
+    energy_report_df: pd.DataFrame,
+    battery_soc_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Add a canonical battery SOC column from fetched or pre-merged SOC data."""
+    if battery_soc_df is None:
+        return energy_report_df
+
+    if "battery" not in battery_soc_df.columns:
+        raise KeyError("battery_soc_df must contain a 'battery' column.")
+
+    result = energy_report_df.copy()
+    soc_df = battery_soc_df.copy()
+    if isinstance(soc_df.index, (pd.DatetimeIndex, pd.PeriodIndex)):
+        soc_df = soc_df.reset_index(names="timestamp")
+    if "timestamp" not in soc_df.columns:
+        raise KeyError("battery_soc_df must contain a 'timestamp' column or index.")
+
+    result["timestamp"] = pd.to_datetime(result["timestamp"], errors="coerce", utc=True)
+    soc_df["timestamp"] = pd.to_datetime(soc_df["timestamp"], errors="coerce", utc=True)
+    soc_df = soc_df[["timestamp", "battery"]].rename(
+        columns={"battery": "battery_soc_pct"}
+    )
+    return result.merge(soc_df, on="timestamp", how="left")

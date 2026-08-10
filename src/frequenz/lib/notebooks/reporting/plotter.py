@@ -523,6 +523,270 @@ def plot_time_series(
     return fig
 
 
+def plot_time_series_battery_soc(
+    df: pd.DataFrame,
+    time_col: str | None = None,
+    title: str = "Battery Charge/Discharge and SOC",
+    xaxis_title: str = "Timestamp",
+    yaxis_title: str = "kW",
+    legend_title: str | None = "Components",
+    color_dict: dict[str, str] | None = None,
+    battery_power_flow: str = "battery_power_flow",
+    soc_pct: str = "soc",
+    secondary_y_title: str = "SOC [%]",
+    date_range_selector_position: dict[str, object] | None = None,
+    legend_position: dict[str, object] | None = None,
+    legend_max_height: int | float | None = 70,
+    top_margin: int = 160,
+) -> go.Figure:
+    """Plot battery charging, discharging, and SOC over time.
+
+    This is a focused adapter around :func:`plot_time_series`: battery charging
+    and discharging are rendered on the primary y-axis, while SOC percentage is
+    rendered on the secondary y-axis. The adapter only normalizes input column
+    names and defaults; all layout, hover, legend, range selector, and secondary
+    axis behavior comes from :func:`plot_time_series`.
+
+    Args:
+        df: Source DataFrame containing battery charging, discharging, and SOC.
+        time_col: Optional timestamp column to use as the x-axis.
+        title: Plot title.
+        xaxis_title: X-axis label.
+        yaxis_title: Primary y-axis label for charging/discharging.
+        legend_title: Legend title.
+        color_dict: Optional color mapping for display trace names.
+        battery_power_flow: Column containing battery power flow values. Used to
+            derive charging and discharging. Positive values are charging and
+            negative values are discharging.
+        soc_pct: Column containing SOC percentage values.
+        secondary_y_title: Secondary y-axis label for SOC.
+        date_range_selector_position: Optional Plotly range selector positioning
+            options forwarded to :func:`plot_time_series`.
+        legend_position: Optional Plotly legend positioning options forwarded to
+            :func:`plot_time_series`.
+        legend_max_height: Maximum legend height forwarded to
+            :func:`plot_time_series`.
+        top_margin: Top layout margin in pixels forwarded to
+            :func:`plot_time_series`.
+
+    Returns:
+        A Plotly figure with battery power on the primary y-axis and SOC on the
+        secondary y-axis.
+
+    Raises:
+        KeyError: If any configured input column is missing.
+    """
+    required_cols = [battery_power_flow, soc_pct]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise KeyError(
+            "Missing column(s) required for battery SOC plot: "
+            f"{', '.join(missing_cols)}"
+        )
+
+    plot_df = df.copy()
+    battery_flow = pd.to_numeric(plot_df[battery_power_flow], errors="coerce")
+    plot_df["Battery Charging"] = battery_flow.clip(lower=0)
+    plot_df["Battery Discharging"] = battery_flow.clip(upper=0)
+    plot_df["Battery SOC (%)"] = plot_df[soc_pct]
+
+    cols = ["Battery Charging", "Battery Discharging", "Battery SOC (%)"]
+    colors = dict(color_dict or {})
+    colors.setdefault("Battery Charging", COLOR_DICT["Batterie Beladung"])
+    colors.setdefault("Battery Discharging", COLOR_DICT["Batterie Entladung"])
+    colors.setdefault("Battery SOC (%)", COLOR_DICT["day_ahead_price"])
+
+    return plot_time_series(
+        plot_df,
+        time_col=time_col,
+        cols=cols,
+        title=title,
+        xaxis_title=xaxis_title,
+        yaxis_title=yaxis_title,
+        legend_title=legend_title,
+        color_dict=colors,
+        fill_cols=["Battery Charging", "Battery Discharging"],
+        secondary_y_cols=["Battery SOC (%)"],
+        secondary_y_title=secondary_y_title,
+        date_range_selector_position=date_range_selector_position,
+        legend_position=legend_position,
+        legend_max_height=legend_max_height,
+        top_margin=top_margin,
+    )
+
+
+# pylint: disable=too-many-arguments, too-many-positional-arguments, too-many-locals
+def plot_time_series_battery_soc_and_usecase(
+    df: pd.DataFrame,
+    time_col: str | None = None,
+    cols: list[str] | None = None,
+    title: str = "Battery Charge/Discharge and SOC",
+    xaxis_title: str = "Timestamp",
+    yaxis_title: str = "kW",
+    legend_title: str | None = "Components",
+    color_dict: dict[str, str] | None = None,
+    long_format_flag: bool = False,
+    category_col: str | None = None,
+    value_col: str | None = None,
+    fill_cols: list[str] | None = None,
+    dotted_cols: list[str] | None = None,
+    plot_order: list[str] | None = None,
+    shade_by_category: bool = False,
+    battery_power_flow: str = "battery_power_flow",
+    battery_charging: str = "battery_discharge",
+    battery_discharging: str = "battery_charge",
+    pv_col: str = "pv",
+    consumption_col: str = "mid_consumption",
+    grid_consumption: str = "grid_consumption",
+    stack_mode: BatteryUsecaseStackMode = "psc",
+    soc_pct: str = "soc",
+    soc_secondary_y_title: str = "SOC [%]",
+    secondary_y_cols: Sequence[str] | None = None,
+    secondary_y_title: str | None = None,
+    date_range_selector_position: dict[str, object] | None = None,
+    legend_position: dict[str, object] | None = None,
+    legend_max_height: int | float | None = 70,
+    top_margin: int = 160,
+) -> go.Figure:
+    """Plot SOC and battery-usecase views with buttons to switch between them.
+
+    This accepts the same battery-usecase options as
+    :func:`plot_time_series_battery_usecase`. The ``secondary_y_cols`` and
+    ``secondary_y_title`` options apply to the battery-usecase view, while
+    ``soc_secondary_y_title`` applies to the SOC view.
+    """
+    missing_soc_cols = [
+        col for col in (battery_power_flow, soc_pct) if col not in df.columns
+    ]
+    if missing_soc_cols:
+        return plot_time_series_battery_usecase(
+            df,
+            time_col=time_col,
+            title=title,
+            xaxis_title=xaxis_title,
+            yaxis_title=yaxis_title,
+            legend_title=legend_title,
+            color_dict=color_dict,
+            cols=cols,
+            long_format_flag=long_format_flag,
+            category_col=category_col,
+            value_col=value_col,
+            fill_cols=fill_cols,
+            dotted_cols=dotted_cols,
+            plot_order=plot_order,
+            shade_by_category=shade_by_category,
+            battery_power_flow=battery_power_flow,
+            battery_charging=battery_charging,
+            battery_discharging=battery_discharging,
+            pv_col=pv_col,
+            consumption_col=consumption_col,
+            grid_consumption=grid_consumption,
+            stack_mode=stack_mode,
+            secondary_y_cols=secondary_y_cols,
+            secondary_y_title=secondary_y_title,
+            date_range_selector_position=date_range_selector_position,
+            legend_position=legend_position,
+            legend_max_height=legend_max_height,
+            top_margin=top_margin,
+        )
+
+    fig = plot_time_series_battery_soc(
+        df,
+        time_col=time_col,
+        title=title,
+        xaxis_title=xaxis_title,
+        yaxis_title=yaxis_title,
+        legend_title=legend_title,
+        color_dict=color_dict,
+        battery_power_flow=battery_power_flow,
+        soc_pct=soc_pct,
+        secondary_y_title=soc_secondary_y_title,
+        date_range_selector_position=date_range_selector_position,
+        legend_position=legend_position,
+        legend_max_height=legend_max_height,
+        top_margin=top_margin,
+    )
+    usecase_fig = plot_time_series_battery_usecase(
+        df,
+        time_col=time_col,
+        title=title,
+        xaxis_title=xaxis_title,
+        yaxis_title=yaxis_title,
+        legend_title=legend_title,
+        color_dict=color_dict,
+        cols=cols,
+        long_format_flag=long_format_flag,
+        category_col=category_col,
+        value_col=value_col,
+        fill_cols=fill_cols,
+        dotted_cols=dotted_cols,
+        plot_order=plot_order,
+        shade_by_category=shade_by_category,
+        battery_power_flow=battery_power_flow,
+        battery_charging=battery_charging,
+        battery_discharging=battery_discharging,
+        pv_col=pv_col,
+        consumption_col=consumption_col,
+        grid_consumption=grid_consumption,
+        stack_mode=stack_mode,
+        secondary_y_cols=secondary_y_cols,
+        secondary_y_title=secondary_y_title,
+        date_range_selector_position=date_range_selector_position,
+        legend_position=legend_position,
+        legend_max_height=legend_max_height,
+        top_margin=top_margin,
+    )
+
+    soc_trace_count = len(fig.data)
+    soc_yaxis2 = fig.layout.yaxis2.to_plotly_json()
+    usecase_yaxis2 = usecase_fig.layout.yaxis2.to_plotly_json()
+    for trace in fig.data:
+        trace.visible = False
+    for trace in usecase_fig.data:
+        trace.visible = True
+        fig.add_trace(trace)
+
+    trace_count = len(fig.data)
+    visible_soc = [idx < soc_trace_count for idx in range(trace_count)]
+    visible_usecase = [idx >= soc_trace_count for idx in range(trace_count)]
+
+    fig.update_layout(
+        height=650,
+        width=800,
+        margin=dict(r=200),
+        yaxis2=usecase_yaxis2,
+        updatemenus=[
+            {
+                "type": "buttons",
+                "direction": "down",
+                "x": 1.1,
+                "xanchor": "left",
+                "y": 1.0,
+                "yanchor": "top",
+                "buttons": [
+                    {
+                        "args": [
+                            {"visible": visible_usecase},
+                            {"yaxis2": usecase_yaxis2},
+                        ],
+                        "label": "Battery Usecase View",
+                        "method": "update",
+                    },
+                    {
+                        "args": [
+                            {"visible": visible_soc},
+                            {"yaxis2": soc_yaxis2},
+                        ],
+                        "label": "Battery SOC plot",
+                        "method": "update",
+                    },
+                ],
+            }
+        ],
+    )
+    return fig
+
+
 # pylint: disable=too-many-statements
 def plot_time_series_battery_usecase(
     df: pd.DataFrame,

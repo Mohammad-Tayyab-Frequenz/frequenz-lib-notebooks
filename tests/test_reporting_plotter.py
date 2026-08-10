@@ -12,6 +12,8 @@ from math import isclose
 import pandas as pd
 
 from frequenz.lib.notebooks.reporting.plotter import (  # noqa: E402
+    plot_time_series_battery_soc,
+    plot_time_series_battery_soc_and_usecase,
     plot_time_series_battery_usecase,
 )
 from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
@@ -22,6 +24,173 @@ gridpool = sys.modules.setdefault(
 
 if not hasattr(gridpool, "MicrogridConfig"):
     setattr(gridpool, "MicrogridConfig", object)
+
+
+def test_plot_time_series_battery_soc_uses_secondary_axis_for_soc() -> None:
+    """Battery charge/discharge should share y, while SOC uses y2."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "battery_power_flow": [5.0, -4.0],
+            "soc": [42.0, 53.0],
+            "ignored": [10.0, 11.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc(df, time_col="timestamp")
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert list(traces_by_name) == [
+        "Battery Charging",
+        "Battery Discharging",
+        "Battery SOC (%)",
+    ]
+    assert traces_by_name["Battery Charging"].yaxis == "y"
+    assert traces_by_name["Battery Discharging"].yaxis == "y"
+    assert traces_by_name["Battery SOC (%)"].yaxis == "y2"
+    assert traces_by_name["Battery Charging"].fill == "tozeroy"
+    assert traces_by_name["Battery Discharging"].fill == "tozeroy"
+    assert traces_by_name["Battery SOC (%)"].fill == "none"
+    assert list(traces_by_name["Battery Charging"].y) == [5.0, 0.0]
+    assert list(traces_by_name["Battery Discharging"].y) == [0.0, -4.0]
+    assert fig.layout.yaxis.title.text == "kW"
+    assert fig.layout.yaxis2.title.text == "SOC [%]"
+    assert fig.layout.xaxis.rangeslider.visible is True
+    assert not fig.layout.updatemenus
+
+
+def test_plot_time_series_battery_soc_accepts_custom_power_flow_column() -> None:
+    """A caller-specific battery flow column should be split for plotting."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "battery_kw": [7.0, -2.0],
+            "soc_pct": [42.0, 53.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc(
+        df,
+        time_col="timestamp",
+        battery_power_flow="battery_kw",
+        soc_pct="soc_pct",
+    )
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert list(traces_by_name["Battery Charging"].y) == [7.0, 0.0]
+    assert list(traces_by_name["Battery Discharging"].y) == [0.0, -2.0]
+
+
+def test_plot_time_series_battery_soc_and_usecase_adds_view_button() -> None:
+    """A full battery dataframe should get a SOC/usecase view switch."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "pv": [12.0, 10.0],
+            "day_ahead_price": [80.0, 95.0],
+            "battery_soc_pct": [42.0, 53.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc_and_usecase(
+        df,
+        time_col="timestamp",
+        soc_pct="battery_soc_pct",
+        secondary_y_cols=["day_ahead_price"],
+        secondary_y_title="EUR/MWh",
+        title="Lastgang Übersicht",
+        dotted_cols=[
+            "grid_consumption_without_battery",
+            "peak_before_optimization",
+            "day_ahead_price",
+        ],
+        stack_mode="energy_balance",
+    )
+
+    assert len(fig.layout.updatemenus) == 1
+    assert fig.layout.width == 800
+    assert fig.layout.margin.r == 200
+    assert fig.layout.updatemenus[0].x == 1.1
+    assert fig.layout.updatemenus[0].xanchor == "left"
+    assert fig.layout.updatemenus[0].direction == "down"
+    buttons = fig.layout.updatemenus[0].buttons
+    assert [button.label for button in buttons] == [
+        "Battery Usecase View",
+        "Battery SOC plot",
+    ]
+
+    assert buttons[0].args[1]["yaxis2"]["title"]["text"] == "EUR/MWh"
+    assert buttons[1].args[1]["yaxis2"]["title"]["text"] == "SOC [%]"
+    usecase_visible = list(buttons[0].args[0]["visible"])
+    soc_visible = list(buttons[1].args[0]["visible"])
+    assert soc_visible[:3] == [True, True, True]
+    assert not any(soc_visible[3:])
+    assert usecase_visible[:3] == [False, False, False]
+    assert any(usecase_visible[3:])
+    assert all(trace.visible is False for trace in fig.data[:3])
+    assert all(trace.visible is True for trace in fig.data[3:])
+    assert fig.layout.yaxis2.title.text == "EUR/MWh"
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+    assert traces_by_name["Day Ahead Preis"].yaxis == "y2"
+    assert traces_by_name["Day Ahead Preis"].line.dash == "dot"
+    assert "battery_soc_pct" not in traces_by_name
+    assert "Batterie SOC %" not in traces_by_name
+
+
+def test_plot_time_series_battery_soc_and_usecase_without_battery_columns() -> None:
+    """A non-battery dataframe should still produce the usecase plot."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "pv": [12.0, 10.0],
+            "day_ahead_price": [80.0, 95.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc_and_usecase(
+        df,
+        time_col="timestamp",
+        secondary_y_cols=["day_ahead_price"],
+        secondary_y_title="EUR/MWh",
+        dotted_cols=["day_ahead_price"],
+    )
+
+    assert not fig.layout.updatemenus
+    assert fig.layout.yaxis2.title.text == "EUR/MWh"
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+    assert "Battery SOC (%)" not in traces_by_name
+    assert "Day Ahead Preis" in traces_by_name
+    assert traces_by_name["Day Ahead Preis"].yaxis == "y2"
+
+
+def test_plot_time_series_battery_soc_does_not_add_view_button() -> None:
+    """The standalone SOC plot should not include the usecase toggle."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "soc": [42.0, 53.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc(df, time_col="timestamp")
+
+    assert not fig.layout.updatemenus
 
 
 def test_plot_time_series_battery_usecase_adds_peak_lines() -> None:
