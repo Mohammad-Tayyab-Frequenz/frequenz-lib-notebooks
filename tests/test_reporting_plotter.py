@@ -115,15 +115,15 @@ def test_plot_time_series_battery_soc_and_usecase_adds_view_button() -> None:
     )
 
     assert len(fig.layout.updatemenus) == 1
-    assert fig.layout.width == 800
-    assert fig.layout.margin.r == 200
+    assert fig.layout.width == 950
+    assert fig.layout.margin.r == 180
     assert fig.layout.updatemenus[0].x == 1.1
     assert fig.layout.updatemenus[0].xanchor == "left"
     assert fig.layout.updatemenus[0].direction == "down"
     buttons = fig.layout.updatemenus[0].buttons
     assert [button.label for button in buttons] == [
-        "Battery Usecase View",
-        "Battery SOC plot",
+        "Gesamt<br>Energieprofil",
+        "Batterie<br>Ladezustand",
     ]
 
     assert buttons[0].args[1]["yaxis2"]["title"]["text"] == "EUR/MWh"
