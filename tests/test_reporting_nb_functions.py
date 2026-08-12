@@ -499,7 +499,6 @@ def test_aggregate_metrics_computes_energy_peak_date_and_pricing() -> None:
             "pv_asset_production": [1.0, 2.0],
             "chp_asset_production": [0.0, 1.0],
             "production_self_use": [0.5, 1.0],
-            "production_excess_in_bat": [0.2, 0.3],
             "grid_feed_in": [0.0, 4.0],
             "grid_consumption": [-1.0, 5.0],
             "mid_consumption": [2.0, 6.0],
@@ -518,11 +517,15 @@ def test_aggregate_metrics_computes_energy_peak_date_and_pricing() -> None:
         "chp_production_sum": 1.0,
         "wind_production_sum": 0.0,
         "prod_self_consumption_sum": 1.5,
-        "prod_bat_sum": 0.5,
         "grid_feed_in_sum": 4.0,
         "grid_consumption_sum": 5.0,
         "mid_consumption_sum": 8.0,
         "total_production_sum": 4.0,
+        "production_to_battery_sum": 0.0,
+        "prod_bat_sum": 0.0,
+        "grid_to_battery_sum": 0.0,
+        "battery_to_grid_sum": 0.0,
+        "battery_to_consumption_sum": 0.0,
         "prod_self_consumption_share": 0.1875,
         "prod_self_production_share": 0.375,
         "peak": 5.0,
@@ -530,3 +533,55 @@ def test_aggregate_metrics_computes_energy_peak_date_and_pricing() -> None:
         "grid_import_cost_sum": 1.0,
         "grid_feed_in_revenue_sum": 0.8,
     }
+
+
+def test_aggregate_metrics_adds_battery_flow_splits() -> None:
+    """Battery charge/discharge should be split by production, grid, and load."""
+    energy_report_df = pd.DataFrame(
+        {
+            "pv_asset_production": [10.0, 2.0, 1.0, 8.0],
+            "mid_consumption": [4.0, 5.0, 4.0, 3.0],
+            "battery_power_flow": [3.0, 4.0, -2.0, -2.0],
+            "production_excess": [6.0, 0.0, 0.0, 5.0],
+            "grid_feed_in": [3.0, 0.0, 0.0, 7.0],
+            "grid_consumption": [-3.0, 7.0, 1.0, -7.0],
+            "production_to_battery": [3.0, 0.0, 0.0, 0.0],
+            "grid_to_battery": [0.0, 4.0, 0.0, 0.0],
+            "battery_to_grid": [0.0, 0.0, 0.0, 2.0],
+            "battery_to_consumption": [0.0, 0.0, 2.0, 0.0],
+        }
+    )
+
+    result = aggregate_metrics(
+        energy_report_df,
+        resolution=timedelta(hours=1),
+    )
+
+    assert result["production_to_battery_sum"] == 3.0
+    assert result["prod_bat_sum"] == 3.0
+    assert result["grid_to_battery_sum"] == 4.0
+    assert result["battery_to_grid_sum"] == 2.0
+    assert result["battery_to_consumption_sum"] == 2.0
+    assert result["grid_consumption_sum"] == 8.0
+
+
+def test_aggregate_metrics_aggregates_production_to_battery() -> None:
+    """production_to_battery_sum is aggregated from the upstream flow column."""
+    energy_report_df = pd.DataFrame(
+        {
+            "pv_asset_production": [10.0],
+            "mid_consumption": [4.0],
+            "battery_power_flow": [1.0],
+            "grid_feed_in": [5.0],
+            "production_to_battery": [1.0],
+            "grid_to_battery": [0.0],
+        }
+    )
+
+    result = aggregate_metrics(
+        energy_report_df,
+        resolution=timedelta(hours=1),
+    )
+
+    assert result["production_to_battery_sum"] == 1.0
+    assert result["grid_to_battery_sum"] == 0.0

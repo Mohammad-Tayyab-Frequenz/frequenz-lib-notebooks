@@ -20,6 +20,7 @@ from frequenz.lib.notebooks.reporting.utils.helpers import (
     _column_has_data,
     _get_numeric_series,
     _sum_cols,
+    add_energy_flows,
     build_color_map,
     convert_timezone,
     fill_aggregated_component_columns,
@@ -61,6 +62,43 @@ def test_sum_cols_handles_empty_and_missing_inputs() -> None:
 
     empty = _sum_cols(df, [])
     assert_series_equal(empty, pd.Series(0.0, index=df.index, dtype="float64"))
+
+
+def test_add_energy_flows_adds_battery_flow_columns() -> None:
+    """Battery flow columns are calculated with the other reporting metrics."""
+    df = pd.DataFrame(
+        {
+            "grid": [-3.0, 7.0, 1.0, -7.0],
+            "pv": [-10.0, -2.0, -1.0, -8.0],
+            "consumption": [4.0, 5.0, 4.0, 3.0],
+            "battery": [3.0, 4.0, -2.0, -2.0],
+        }
+    )
+
+    result = add_energy_flows(
+        df,
+        production_cols=["pv"],
+        consumption_cols=["consumption"],
+        grid_cols=["grid"],
+        battery_cols=["battery"],
+    )
+
+    assert_series_equal(
+        result["production_to_battery"],
+        pd.Series([3.0, 0.0, 0.0, 0.0], name="production_to_battery"),
+    )
+    assert_series_equal(
+        result["grid_to_battery"],
+        pd.Series([0.0, 4.0, 0.0, 0.0], name="grid_to_battery"),
+    )
+    assert_series_equal(
+        result["battery_to_grid"],
+        pd.Series([0.0, 0.0, 0.0, 2.0], name="battery_to_grid"),
+    )
+    assert_series_equal(
+        result["battery_to_consumption"],
+        pd.Series([0.0, 0.0, 2.0, 0.0], name="battery_to_consumption"),
+    )
 
 
 def test_column_has_data_checks_numeric_content() -> None:

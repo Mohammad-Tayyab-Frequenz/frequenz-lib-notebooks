@@ -579,7 +579,8 @@ def compute_energy_summary(
     return out
 
 
-def aggregate_metrics(  # pylint: disable=too-many-locals
+# pylint: disable=too-many-locals, too-many-statements
+def aggregate_metrics(
     energy_report_df: pd.DataFrame,
     resolution: timedelta,
     *,
@@ -602,7 +603,12 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
             - ``chp_asset_production`` — CHP generation power
             - ``wind_asset_production`` — Wind generation power
             - ``production_self_use`` — Self-consumed on-site production
-            - ``production_excess_in_bat`` — Excess production stored in the battery
+            - ``battery_power_flow`` — Battery power using PSC convention:
+              positive values charge the battery, negative values discharge it
+            - ``production_to_battery`` — Production power stored in the battery
+            - ``grid_to_battery`` — Grid power stored in the battery
+            - ``battery_to_grid`` — Battery discharge exported to the grid
+            - ``battery_to_consumption`` — Battery discharge used locally
             - ``grid_feed_in`` — Exported power to the grid
             - ``grid_consumption`` — Imported power from the grid
             - ``mid_consumption`` — Total site consumption power
@@ -626,7 +632,15 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
             - ``prod_self_consumption_sum``
             Total self-consumed energy (kWh)
             - ``prod_bat_sum``
-            Energy stored in the battery (kWh)
+            Alias for ``production_to_battery_sum`` for backward compatibility
+            - ``production_to_battery_sum``
+            Production energy stored in the battery (kWh)
+            - ``grid_to_battery_sum``
+            Grid energy stored in the battery (kWh)
+            - ``battery_to_grid_sum``
+            Battery discharge exported to the grid (kWh)
+            - ``battery_to_consumption_sum``
+            Battery discharge used by local consumption (kWh)
             - ``grid_feed_in_sum``
             Total exported energy (kWh)
             - ``grid_consumption_sum``
@@ -667,10 +681,13 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
         "chp_asset_production": "chp_production_sum",
         "wind_asset_production": "wind_production_sum",
         "production_self_use": "prod_self_consumption_sum",
-        "production_excess_in_bat": "prod_bat_sum",
         "grid_feed_in": "grid_feed_in_sum",
         "grid_consumption": "grid_consumption_sum",
         "mid_consumption": "mid_consumption_sum",
+        "production_to_battery": "production_to_battery_sum",
+        "grid_to_battery": "grid_to_battery_sum",
+        "battery_to_grid": "battery_to_grid_sum",
+        "battery_to_consumption": "battery_to_consumption_sum",
     }
 
     results = {}
@@ -695,6 +712,7 @@ def aggregate_metrics(  # pylint: disable=too-many-locals
         + results.get("wind_production_sum", 0)
     )
     results["total_production_sum"] = total_production_sum
+    results["prod_bat_sum"] = results["production_to_battery_sum"]
 
     # Note: Use the new consistent key for total consumption
     total_consumption_sum = results.get("mid_consumption_sum", 0)

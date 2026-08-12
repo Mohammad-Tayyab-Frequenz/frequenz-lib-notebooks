@@ -134,6 +134,39 @@ def test_create_energy_report_df_adds_battery_soc_when_formula_exists() -> None:
     assert list(result["battery_soc_pct"]) == [42.0, 53.0]
 
 
+def test_create_energy_report_df_keeps_battery_flow_columns() -> None:
+    """Derived battery flow columns should survive final report column selection."""
+    raw_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-09 06:30:00",
+                    "2026-01-09 06:45:00",
+                    "2026-01-09 07:00:00",
+                    "2026-01-09 07:15:00",
+                ],
+                utc=True,
+            ),
+            "grid": [-3.0, 7.0, 1.0, -7.0],
+            "pv": [-10.0, -2.0, -1.0, -8.0],
+            "consumption": [4.0, 5.0, 4.0, 3.0],
+            "battery": [3.0, 4.0, -2.0, -2.0],
+        }
+    )
+
+    result = create_energy_report_df(
+        raw_df,
+        component_types=["battery", "pv"],
+        mcfg=cast(MicrogridConfig, _DummyMicrogridConfig({"battery": [], "pv": []})),
+        mapper=ColumnMapper.from_default(locale="en"),
+    )
+
+    assert result["production_to_battery"].tolist() == [3.0, 0.0, 0.0, 0.0]
+    assert result["grid_to_battery"].tolist() == [0.0, 4.0, 0.0, 0.0]
+    assert result["battery_to_grid"].tolist() == [0.0, 0.0, 0.0, 2.0]
+    assert result["battery_to_consumption"].tolist() == [0.0, 0.0, 2.0, 0.0]
+
+
 def test_create_energy_report_df_excludes_battery_soc_without_formula() -> None:
     """SOC data is ignored when the config has no battery SOC formula."""
     raw_df = pd.DataFrame(

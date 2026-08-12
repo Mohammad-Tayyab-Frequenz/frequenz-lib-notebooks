@@ -31,17 +31,6 @@ def test_production_excess_clips_negative_surplus() -> None:
     assert_series_equal(result, expected)
 
 
-def test_production_excess_in_bat_respects_battery_limits() -> None:
-    """Battery intake cannot exceed available excess or the battery capacity."""
-    production = pd.Series([-5, -2], index=pd.RangeIndex(2))
-    consumption = pd.Series([1, 3], index=production.index)
-    battery = pd.Series([0.5, -1], index=production.index)
-
-    result = metrics.production_excess_in_bat(production, consumption, battery)
-    expected = pd.Series([0.5, 0.0], index=production.index)
-    assert_series_equal(result, expected)
-
-
 def test_grid_feed_in_prefers_measured_grid_and_infers_when_missing() -> None:
     """Measured grid export is used; otherwise it is inferred from PSC inputs."""
     production = pd.Series([-8, -3], index=pd.RangeIndex(2))
@@ -148,3 +137,110 @@ def test_grid_consumption_prefers_measured_grid_and_infers_when_missing() -> Non
 
     with pytest.raises(ValueError):
         metrics.grid_consumption(None, None, None, None)
+
+
+def test_battery_power_flows_splits_charge_and_discharge_sources() -> None:
+    """Battery power flow splits production/grid charge and grid/load discharge."""
+    (
+        production_to_battery,
+        grid_to_battery,
+        battery_to_grid,
+        battery_to_consumption,
+    ) = metrics.battery_power_flows(
+        grid=pd.Series([-3.0, 7.0, 1.0, -7.0]),
+        production=pd.Series([10.0, 2.0, 1.0, 8.0]),
+        consumption=pd.Series([4.0, 5.0, 4.0, 3.0]),
+        battery=pd.Series([3.0, 4.0, -2.0, -2.0]),
+    )
+
+    assert_series_equal(
+        production_to_battery,
+        pd.Series([3.0, 0.0, 0.0, 0.0], name="production_to_battery"),
+    )
+    assert_series_equal(
+        grid_to_battery, pd.Series([0.0, 4.0, 0.0, 0.0], name="grid_to_battery")
+    )
+    assert_series_equal(
+        battery_to_grid, pd.Series([0.0, 0.0, 0.0, 2.0], name="battery_to_grid")
+    )
+    assert_series_equal(
+        battery_to_consumption,
+        pd.Series([0.0, 0.0, 2.0, 0.0], name="battery_to_consumption"),
+    )
+
+
+def test_battery_power_flows_balances_gross_consumption() -> None:
+    """Self-use, grid import, and battery-to-load should sum to consumption."""
+    grid = pd.Series([2.0, 5.0])
+    production = pd.Series([4.0, 3.0])
+    consumption = pd.Series([10.0, 8.0])
+    _, _, _, battery_to_consumption = metrics.battery_power_flows(
+        grid=grid,
+        production=production,
+        consumption=consumption,
+        battery=pd.Series([-4.0, -1.0]),
+    )
+
+    expected_battery_to_consumption = pd.Series(
+        [4.0, 0.0], name="battery_to_consumption"
+    )
+    assert_series_equal(battery_to_consumption, expected_battery_to_consumption)
+    assert_series_equal(
+        production + grid + battery_to_consumption,
+        consumption,
+        check_names=False,
+    )
+
+
+def test_battery_power_flows_conserves_charge_and_discharge() -> None:
+    """Battery flow splits should sum back to measured charge and discharge."""
+    battery = pd.Series([4.0, -3.0, -2.0, 5.0])
+    (
+        production_to_battery,
+        grid_to_battery,
+        battery_to_grid,
+        battery_to_consumption,
+    ) = metrics.battery_power_flows(
+        grid=pd.Series([1.0, 3.0, 0.0, 0.0]),
+        production=pd.Series([13.0, 2.0, 1.0, 5.0]),
+        consumption=pd.Series([8.0, 10.0, 3.0, 3.0]),
+        battery=battery,
+    )
+
+    battery_charge = battery.clip(lower=0)
+    battery_discharge = -battery.clip(upper=0)
+
+    assert_series_equal(
+        production_to_battery + grid_to_battery,
+        battery_charge,
+        check_names=False,
+    )
+    assert_series_equal(
+        battery_to_consumption + battery_to_grid,
+        battery_discharge,
+        check_names=False,
+    )
+
+
+def test_battery_power_flows_caps_production_to_battery_at_actual_charge() -> None:
+    """Production-to-battery power is bounded by measured battery charge power."""
+    (
+        production_to_battery,
+        grid_to_battery,
+        battery_to_grid,
+        battery_to_consumption,
+    ) = metrics.battery_power_flows(
+        grid=pd.Series([0.0]),
+        production=pd.Series([10.0]),
+        consumption=pd.Series([4.0]),
+        battery=pd.Series([1.0]),
+    )
+
+    assert_series_equal(
+        production_to_battery, pd.Series([1.0], name="production_to_battery")
+    )
+    assert_series_equal(grid_to_battery, pd.Series([0.0], name="grid_to_battery"))
+    assert_series_equal(battery_to_grid, pd.Series([0.0], name="battery_to_grid"))
+    assert_series_equal(
+        battery_to_consumption, pd.Series([0.0], name="battery_to_consumption")
+    )

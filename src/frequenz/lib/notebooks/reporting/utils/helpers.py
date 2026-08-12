@@ -52,11 +52,11 @@ from frequenz.gridpool import MicrogridConfig
 
 from frequenz.lib.notebooks.reporting.metrics.reporting_metrics import (
     asset_production,
+    battery_power_flows,
     consumption,
     grid_consumption,
     grid_feed_in,
     production_excess,
-    production_excess_in_bat,
     production_self_consumption,
     production_self_share,
     production_self_usage,
@@ -414,7 +414,10 @@ def get_energy_report_columns(
 
     # Columns available ONLY when battery exists
     battery_dependent_cols = [
-        "production_excess_in_bat",
+        "production_to_battery",
+        "grid_to_battery",
+        "battery_to_grid",
+        "battery_to_consumption",
     ]
 
     # Check if any production component is present
@@ -464,9 +467,12 @@ def add_energy_flows(
     Returns:
         A DataFrame including additional columns:
             - "production_excess": Production exceeding consumption.
-            - "production_excess_in_bat": Portion of excess stored in the battery.
             - "grid_feed_in": Portion of excess fed into the grid.
             - "production_self_use": Self-consumed portion of production.
+            - "production_to_battery": Production energy sent to the battery.
+            - "grid_to_battery": Grid energy sent to the battery.
+            - "battery_to_grid": Battery discharge exported to the grid.
+            - "battery_to_consumption": Battery discharge used by consumption.
             - "production_self_share": Share of production that is self-consumed
               (self-consumed / total production).
             - "production_self_usage": Share of consumption covered by
@@ -489,9 +495,6 @@ def add_energy_flows(
     ]
 
     battery_power_series = _sum_cols(df_flows, resolved_battery_cols)
-    battery_charge_series = (
-        battery_power_series.reindex(df_flows.index).fillna(0.0).clip(lower=0.0)
-    )
     grid_power_series = _sum_cols(df_flows, resolved_grid_cols)
 
     # Compute total asset production
@@ -537,13 +540,6 @@ def add_energy_flows(
         df_flows["consumption_total"],
     )
 
-    # Battery charging power (optional)
-    df_flows["production_excess_in_bat"] = production_excess_in_bat(
-        df_flows["production_total"] * -1,
-        df_flows["consumption_total"],
-        battery=battery_charge_series,
-    )
-
     # Split excess into battery vs. grid
     df_flows["grid_feed_in"] = grid_feed_in(
         # To convert positive production back to PSC format (where production is negative)
@@ -583,6 +579,18 @@ def add_energy_flows(
             df_flows["consumption_total"],
             battery_power_series,
         )
+
+    (
+        df_flows["production_to_battery"],
+        df_flows["grid_to_battery"],
+        df_flows["battery_to_grid"],
+        df_flows["battery_to_consumption"],
+    ) = battery_power_flows(
+        grid=grid_power_series,
+        production=df_flows["production_total"],
+        consumption=df_flows["consumption_total"],
+        battery=battery_power_series,
+    )
 
     df_flows = df_flows.drop(
         columns=["production_total", "consumption_total"], errors="ignore"
