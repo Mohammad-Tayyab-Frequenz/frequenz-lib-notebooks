@@ -59,30 +59,6 @@ def production_excess(production: pd.Series, consumption: pd.Series) -> pd.Serie
     return (asset_production_series - consumption).clip(lower=0)
 
 
-def production_excess_in_bat(
-    production: pd.Series,
-    consumption: pd.Series,
-    battery: pd.Series,
-) -> pd.Series:
-    """Calculate the portion of excess production stored in the battery.
-
-    Compares available production surplus with the battery's charging capability
-    at each timestamp and takes the elementwise minimum.
-
-    Args:
-        production: Series of production values (e.g., kW or MW).
-        consumption: Series of consumption values (same units as `production`).
-        battery: Series representing the battery's available charging capacity
-            or power limit at each timestamp.
-
-    Returns:
-        A Series showing the actual production power stored in the battery.
-    """
-    production_excess_series = production_excess(production, consumption)
-    battery = battery.astype("float64").clip(lower=0)
-    return pd.concat([production_excess_series, battery], axis=1).min(axis=1)
-
-
 def grid_feed_in(
     production: pd.Series | None,
     consumption: pd.Series | None,
@@ -302,3 +278,77 @@ def grid_consumption(
 
     # We only want the import portion (≥ 0)
     return inferred.clip(lower=0)  # type: ignore[union-attr]
+
+
+# pylint: disable=too-many-locals
+def battery_power_flows(
+    grid: pd.Series,
+    production: pd.Series,
+    consumption: pd.Series,
+    battery: pd.Series,
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    """Compute battery charge/discharge flow splits from power series.
+
+    Args:
+        grid: Grid power series. Positive values are grid import; negative
+            values are grid export.
+        production: Non-negative total on-site production power series.
+        consumption: Non-negative gross site consumption power series.
+        battery: Battery power series. Positive values charge the battery;
+            negative values discharge the battery.
+
+    Returns:
+        A tuple containing ``production_to_battery``, ``grid_to_battery``,
+        ``battery_to_grid``, and ``battery_to_consumption`` series.
+    """
+    grid_series = grid.fillna(0.0).astype("float64")
+    production_series = production.fillna(0.0).astype("float64").clip(lower=0)
+    consumption_series = consumption.fillna(0.0).astype("float64").clip(lower=0)
+    battery_series = battery.fillna(0.0).astype("float64")
+
+    battery_charge_series = battery_series.clip(lower=0)
+    battery_discharge_series = (-battery_series.clip(upper=0)).fillna(0.0)
+    grid_consumption_series = grid_consumption(
+        grid=grid_series,
+        production=production_series * -1,
+        consumption=consumption_series,
+        battery=battery_series,
+    )
+
+    production_to_battery_series = pd.concat(
+        [
+            production_excess(production_series * -1, consumption_series),
+            battery_charge_series,
+        ],
+        axis=1,
+    ).min(axis=1)
+    grid_to_battery_series = (
+        battery_charge_series - production_to_battery_series
+    ).clip(lower=0)
+
+    production_self_use_series = production_self_consumption(
+        production=production_series * -1,
+        consumption=consumption_series,
+    )
+    battery_to_consumption_series = (
+        consumption_series - production_self_use_series - grid_consumption_series
+    ).clip(lower=0)
+    battery_to_consumption_series = pd.concat(
+        [battery_to_consumption_series, battery_discharge_series],
+        axis=1,
+    ).min(axis=1)
+    battery_to_grid_series = (
+        battery_discharge_series - battery_to_consumption_series
+    ).clip(lower=0)
+
+    production_to_battery_series.name = "production_to_battery"
+    grid_to_battery_series.name = "grid_to_battery"
+    battery_to_grid_series.name = "battery_to_grid"
+    battery_to_consumption_series.name = "battery_to_consumption"
+
+    return (
+        production_to_battery_series,
+        grid_to_battery_series,
+        battery_to_grid_series,
+        battery_to_consumption_series,
+    )
