@@ -1,13 +1,16 @@
 # License: MIT
 # Copyright © 2025 Frequenz Energy-as-a-Service GmbH
+# pylint: disable=too-many-lines
 
 """Plotting functions for the reporting module."""
 
 from collections.abc import Sequence
+from typing import cast
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly_resampler import FigureResampler
 
 from frequenz.lib.notebooks.reporting.utils.battery_usecase_plot import (
     BatteryUsecaseStackMode,
@@ -21,6 +24,36 @@ from frequenz.lib.notebooks.reporting.utils.colors import (
     generate_shades,
 )
 from frequenz.lib.notebooks.reporting.utils.helpers import build_color_map, long_to_wide
+
+
+def _with_plotly_resampler(
+    fig: go.Figure,
+    *,
+    enabled: bool,
+    default_n_shown_samples: int,
+) -> go.Figure:
+    """Wrap a Plotly figure with dynamic resampling when available.
+
+    Args:
+        fig: The Plotly figure to wrap.
+        enabled: Whether resampling is enabled.
+        default_n_shown_samples: The default number of shown samples.
+
+    Returns:
+        The wrapped Plotly figure.
+    """
+    if not enabled:
+        return fig
+
+    return cast(
+        go.Figure,
+        FigureResampler(
+            fig,
+            default_n_shown_samples=default_n_shown_samples,
+            resampled_trace_prefix_suffix=("", ""),
+            show_mean_aggregation_size=False,
+        ),
+    )
 
 
 def _coerce_numeric_series(series: pd.Series) -> pd.Series:
@@ -647,6 +680,8 @@ def plot_time_series_battery_soc_and_usecase(
     legend_position: dict[str, object] | None = None,
     legend_max_height: int | float | None = 70,
     top_margin: int = 160,
+    enable_resampler: bool = True,
+    resampler_default_n_shown_samples: int = 5_000,
 ) -> go.Figure:
     """Plot SOC and battery-usecase views with buttons to switch between them.
 
@@ -654,6 +689,9 @@ def plot_time_series_battery_soc_and_usecase(
     :func:`plot_time_series_battery_usecase`. The ``secondary_y_cols`` and
     ``secondary_y_title`` options apply to the battery-usecase view, while
     ``soc_secondary_y_title`` applies to the SOC view.
+    When ``enable_resampler`` is true, the combined figure is wrapped with
+    plotly-resampler so the initial payload stays small and zoom interactions
+    resample from the high-frequency data.
     """
     missing_soc_cols = [
         col for col in (battery_power_flow, soc_pct) if col not in df.columns
@@ -739,7 +777,11 @@ def plot_time_series_battery_soc_and_usecase(
 
     soc_trace_count = len(fig.data)
     soc_yaxis2 = fig.layout.yaxis2.to_plotly_json()
-    usecase_yaxis2 = usecase_fig.layout.yaxis2.to_plotly_json()
+    usecase_yaxis2 = (
+        usecase_fig.layout.yaxis2.to_plotly_json()
+        if hasattr(usecase_fig.layout, "yaxis2")
+        else {"visible": False}
+    )
     for trace in fig.data:
         trace.visible = False
     for trace in usecase_fig.data:
@@ -785,7 +827,11 @@ def plot_time_series_battery_soc_and_usecase(
             }
         ],
     )
-    return fig
+    return _with_plotly_resampler(
+        fig,
+        enabled=enable_resampler,
+        default_n_shown_samples=resampler_default_n_shown_samples,
+    )
 
 
 # pylint: disable=too-many-statements
