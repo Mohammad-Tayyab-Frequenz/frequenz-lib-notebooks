@@ -16,8 +16,10 @@ from frequenz.lib.notebooks.reporting.plotter import (  # noqa: E402
     plot_time_series_battery_soc,
     plot_time_series_battery_soc_and_usecase,
     plot_time_series_battery_usecase,
+    summary_plot,
 )
 from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
+from frequenz.lib.notebooks.reporting.utils.helpers import SummaryPeriod
 
 gridpool = sys.modules.setdefault(
     "frequenz.gridpool", types.ModuleType("frequenz.gridpool")
@@ -25,6 +27,252 @@ gridpool = sys.modules.setdefault(
 
 if not hasattr(gridpool, "MicrogridConfig"):
     setattr(gridpool, "MicrogridConfig", object)
+
+
+# pylint:disable=too-many-statements
+def test_summary_plot_aggregates_standard_columns_to_mwh() -> None:
+    """Standard reporting columns should aggregate by month in MWh."""
+    df = pd.DataFrame(
+        {
+            "grid_consumption": [1000.0, 2000.0],
+            "grid_feed_in": [500.0, 1000.0],
+            "battery_charge": [250.0, 250.0],
+            "battery_discharge": [100.0, 200.0],
+            "mid_consumption": [3000.0, 1000.0],
+            "pv_asset_production": [2000.0, 2000.0],
+            "chp_asset_production": [1000.0, 1000.0],
+            "wind_asset_production": [500.0, 500.0],
+            "idle": [0.0, 0.0],
+        },
+        index=pd.to_datetime(["2026-01-01 00:00:00", "2026-01-01 01:00:00"]),
+    )
+
+    fig, months = summary_plot(df, period="monthly")
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert months.index.tolist() == [pd.Timestamp("2026-01-01").date()]
+    assert all("_pos" not in col and "_neg" not in col for col in months.columns)
+    assert isclose(months.loc[months.index[0], "Netzbezug"], 3.0)
+    assert isclose(months.loc[months.index[0], "Netz Einspeisung"], -1.5)
+    assert isclose(months.loc[months.index[0], "PV-Erzeugung"], -4.0)
+    assert isclose(months.loc[months.index[0], "BHKW-Erzeugung"], -2.0)
+    assert isclose(months.loc[months.index[0], "Wind-Erzeugung"], -1.0)
+    assert "Netzbezug" in traces_by_name
+    assert "Netz Einspeisung" in traces_by_name
+    assert "Batterie Beladung" in traces_by_name
+    assert "Batterie Entladung" in traces_by_name
+    assert "MID Gesamtverbrauch" in traces_by_name
+    assert "PV-Erzeugung" in traces_by_name
+    assert "BHKW-Erzeugung" in traces_by_name
+    assert "Wind-Erzeugung" in traces_by_name
+    assert "CHP" not in traces_by_name
+    assert "PV" not in traces_by_name
+    assert "Wind" not in traces_by_name
+    assert "idle" not in traces_by_name
+    assert list(traces_by_name["Netzbezug"].y) == [3.0]
+    assert list(traces_by_name["Netz Einspeisung"].y) == [-1.5]
+    assert list(traces_by_name["Batterie Beladung"].y) == [0.5]
+    assert list(traces_by_name["Batterie Entladung"].y) == [-0.3]
+    assert list(traces_by_name["PV-Erzeugung"].y) == [-4.0]
+    assert list(traces_by_name["BHKW-Erzeugung"].y) == [-2.0]
+    assert list(traces_by_name["Wind-Erzeugung"].y) == [-1.0]
+    assert traces_by_name["Netzbezug"].marker.color == COLOR_DICT["Netzbezug"]
+    assert traces_by_name["Netz Einspeisung"].marker.color == COLOR_DICT["Netzbezug"]
+    assert traces_by_name["PV-Erzeugung"].marker.color == COLOR_DICT["PV-Erzeugung"]
+    assert (
+        traces_by_name["Batterie Beladung"].marker.color
+        == COLOR_DICT["Batterie Entladung"]
+    )
+    assert (
+        traces_by_name["Batterie Entladung"].marker.color
+        == COLOR_DICT["Batterie Entladung"]
+    )
+    assert traces_by_name["MID Gesamtverbrauch"].marker.color == "rgba(121, 85, 72, 1)"
+    assert traces_by_name["BHKW-Erzeugung"].marker.color == COLOR_DICT["BHKW-Erzeugung"]
+    assert traces_by_name["Wind-Erzeugung"].marker.color == COLOR_DICT["Wind-Erzeugung"]
+    assert traces_by_name["Netzbezug"].opacity is None
+    assert traces_by_name["MID Gesamtverbrauch"].opacity is None
+    assert traces_by_name["Batterie Beladung"].opacity is None
+    assert traces_by_name["Netz Einspeisung"].opacity == 0.75
+    assert traces_by_name["Batterie Entladung"].opacity == 0.75
+    assert traces_by_name["PV-Erzeugung"].opacity == 0.75
+    assert traces_by_name["BHKW-Erzeugung"].opacity == 0.75
+    assert traces_by_name["Wind-Erzeugung"].opacity == 0.75
+    assert fig.layout.barmode == "relative"
+    assert {
+        trace.name: trace.offsetgroup
+        for trace in fig.data
+        if getattr(trace, "name", None)
+    } == {
+        "Netzbezug": "grid",
+        "Netz Einspeisung": "grid",
+        "MID Gesamtverbrauch": "consumption",
+        "Batterie Beladung": "battery",
+        "Batterie Entladung": "battery",
+        "PV-Erzeugung": "production",
+        "BHKW-Erzeugung": "production",
+        "Wind-Erzeugung": "production",
+    }
+    assert all(trace.yaxis is None for trace in fig.data)
+    assert fig.layout.title.y == 0.98
+    assert fig.layout.title.pad.t == 0
+    assert fig.layout.legend.orientation == "h"
+    assert fig.layout.legend.x == 0
+    assert fig.layout.legend.y == 1.05
+    assert fig.layout.margin.t == 60
+    if "maxheight" in getattr(fig.layout.legend, "_valid_props", set()):
+        assert fig.layout.legend.maxheight == 70
+    assert fig.layout.yaxis.title.text == "Energy (MWh)"
+    assert fig.layout.yaxis.domain == (0, 0.95)
+    assert fig.layout.xaxis.title.text == "Timestamp"
+
+
+def test_summary_plot_ignores_columns_without_summary_schema_entries() -> None:
+    """Summary data should only include configured summary columns."""
+    df = pd.DataFrame(
+        {
+            "grid_consumption": [400.0, 100.0],
+            "grid_feed_in": [100.0, 0.0],
+            "battery_charge": [200.0, 300.0],
+            "battery_discharge": [0.0, 200.0],
+            "pv_asset_production": [500.0, 100.0],
+            "day_ahead_price": [70.0, 80.0],
+        },
+        index=pd.to_datetime(["2026-02-01 00:00:00", "2026-02-01 00:30:00"]),
+    )
+
+    fig, months = summary_plot(df, period="monthly")
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert all("_pos" not in col and "_neg" not in col for col in months.columns)
+    assert isclose(months.loc[months.index[0], "Netzbezug"], 0.25)
+    assert isclose(months.loc[months.index[0], "Netz Einspeisung"], -0.05)
+    assert isclose(months.loc[months.index[0], "Batterie Beladung"], 0.25)
+    assert isclose(months.loc[months.index[0], "Batterie Entladung"], -0.1)
+    assert "Netzbezug" in traces_by_name
+    assert "Batterie Beladung" in traces_by_name
+    assert "Netz Einspeisung" in traces_by_name
+    assert "Batterie Entladung" in traces_by_name
+    assert "PV-Erzeugung" in traces_by_name
+    assert "Day Ahead Preis" not in traces_by_name
+    assert list(traces_by_name["Netzbezug"].y) == [0.25]
+    assert list(traces_by_name["Netz Einspeisung"].y) == [-0.05]
+    assert "PV Verbrauch" not in traces_by_name
+    assert list(traces_by_name["PV-Erzeugung"].y) == [-0.3]
+
+
+def test_summary_plot_accepts_pv_as_pv_production_alias() -> None:
+    """A plain pv column should be plotted as PV production in summaries."""
+    df = pd.DataFrame(
+        {
+            "grid_consumption": [400.0, 100.0],
+            "mid_consumption": [600.0, 100.0],
+            "grid_feed_in": [100.0, 0.0],
+            "pv": [500.0, 100.0],
+            "battery_charge": [200.0, 300.0],
+            "battery_discharge": [0.0, 200.0],
+        },
+        index=pd.to_datetime(["2026-02-01 00:00:00", "2026-02-01 00:30:00"]),
+    )
+
+    fig, summary = summary_plot(df, period="monthly")
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert isclose(summary.loc[summary.index[0], "PV-Erzeugung"], -0.3)
+    assert "PV-Erzeugung" in traces_by_name
+    assert list(traces_by_name["PV-Erzeugung"].y) == [-0.3]
+    assert traces_by_name["PV-Erzeugung"].offsetgroup == "production"
+    assert traces_by_name["Batterie Beladung"].offsetgroup == "battery"
+    assert traces_by_name["Batterie Entladung"].offsetgroup == "battery"
+
+
+def test_summary_plot_maps_reporting_columns_to_german_names_and_colors() -> None:
+    """Reporting metric columns should not leak raw names into monthly legends."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-03-01 00:00:00", "2026-03-01 01:00:00"]),
+            "grid_consumption": [400.0, 200.0],
+            "mid_consumption": [500.0, 600.0],
+            "grid_feed_in": [150.0, 50.0],
+            "pv_asset_production": [300.0, 400.0],
+            "chp_asset_production": [100.0, 100.0],
+            "battery_charge": [100.0, 200.0],
+            "battery_discharge": [75.0, 25.0],
+        }
+    )
+
+    fig, months = summary_plot(df, period="monthly")
+    traces_by_name = {
+        trace.name: trace for trace in fig.data if getattr(trace, "name", None)
+    }
+
+    assert set(traces_by_name) == {
+        "Netzbezug",
+        "Batterie Beladung",
+        "MID Gesamtverbrauch",
+        "Netz Einspeisung",
+        "Batterie Entladung",
+        "PV-Erzeugung",
+        "BHKW-Erzeugung",
+    }
+    assert all("_" not in col for col in months.columns)
+    assert "MID Gesamtverbrauch" in months.columns
+    assert list(traces_by_name["Netzbezug"].y) == [0.6]
+    assert list(traces_by_name["Netz Einspeisung"].y) == [-0.2]
+    assert list(traces_by_name["Batterie Entladung"].y) == [-0.1]
+    assert isclose(traces_by_name["PV-Erzeugung"].y[0], -0.7)
+    assert isclose(traces_by_name["BHKW-Erzeugung"].y[0], -0.2)
+    assert traces_by_name["Netzbezug"].marker.color == COLOR_DICT["Netzbezug"]
+    assert traces_by_name["Netz Einspeisung"].marker.color == COLOR_DICT["Netzbezug"]
+    assert (
+        traces_by_name["Batterie Beladung"].marker.color
+        == COLOR_DICT["Batterie Entladung"]
+    )
+    assert (
+        traces_by_name["Batterie Entladung"].marker.color
+        == COLOR_DICT["Batterie Entladung"]
+    )
+    assert traces_by_name["MID Gesamtverbrauch"].marker.color == "rgba(121, 85, 72, 1)"
+    assert traces_by_name["PV-Erzeugung"].marker.color == COLOR_DICT["PV-Erzeugung"]
+    assert traces_by_name["BHKW-Erzeugung"].marker.color == COLOR_DICT["BHKW-Erzeugung"]
+
+
+def test_summary_plot_supports_daily_weekly_monthly_and_yearly_periods() -> None:
+    """Summary plot should aggregate by the selected period."""
+    df = pd.DataFrame(
+        {"grid_consumption": [1.0] * 400},
+        index=pd.date_range("2026-01-01", periods=400, freq="D"),
+    )
+
+    expected_counts: dict[SummaryPeriod, int] = {
+        "daily": 400,
+        "weekly": 58,
+        "monthly": 14,
+        "yearly": 2,
+    }
+    for period, expected_count in expected_counts.items():
+        fig, summary = summary_plot(df, period=period)
+
+        assert len(summary) == expected_count
+        assert fig.layout.title.text == f"{period.capitalize()} Energy"
+
+
+def test_summary_plot_requires_timestamps() -> None:
+    """Summary aggregation needs timestamps in the index or timestamp column."""
+    df = pd.DataFrame({"grid_consumption": [1.0, 2.0]})
+
+    try:
+        summary_plot(df, period="monthly")
+    except TypeError as exc:
+        assert "timestamp" in str(exc)
+    else:
+        raise AssertionError("summary_plot should require timestamps")
 
 
 def test_plot_time_series_battery_soc_uses_secondary_axis_for_soc() -> None:
