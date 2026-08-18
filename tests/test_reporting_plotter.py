@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import types
+import warnings
 from math import isclose
 
 import pandas as pd
@@ -144,6 +145,68 @@ def test_plot_time_series_battery_soc_and_usecase_adds_view_button() -> None:
     assert traces_by_name["Day Ahead Preis"].line.dash == "dot"
     assert "battery_soc_pct" not in traces_by_name
     assert "Batterie SOC %" not in traces_by_name
+
+
+def test_plot_time_series_battery_soc_and_usecase_uses_resampler() -> None:
+    """The combined SOC/usecase plot should dynamically resample large traces."""
+    rows = 100
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-09 06:30:00", periods=rows, freq="s"),
+            "mid_consumption": range(rows),
+            "grid_consumption": range(rows),
+            "battery_power_flow": range(rows),
+            "pv": range(rows),
+            "day_ahead_price": range(rows),
+            "soc": range(rows),
+        }
+    )
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="The 'generic' unit for NumPy timedelta is deprecated",
+            category=DeprecationWarning,
+            module="plotly_resampler.figure_resampler.utils",
+        )
+        fig = plot_time_series_battery_soc_and_usecase(
+            df,
+            time_col="timestamp",
+            secondary_y_cols=["day_ahead_price"],
+            secondary_y_title="EUR/MWh",
+            resampler_default_n_shown_samples=10,
+        )
+
+    assert fig.__class__.__name__ == "FigureResampler"
+    assert len(fig.data[0].x) == 10
+    assert len(fig.hf_data) == len(fig.data)
+    assert all("~" not in str(trace.name) for trace in fig.data)
+
+
+def test_plot_time_series_battery_soc_and_usecase_without_secondary_usecase_axis() -> (
+    None
+):
+    """The view switch should work when only the SOC view uses a secondary axis."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "pv": [12.0, 10.0],
+            "soc": [42.0, 53.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc_and_usecase(
+        df,
+        time_col="timestamp",
+        enable_resampler=False,
+    )
+
+    buttons = fig.layout.updatemenus[0].buttons
+    assert buttons[0].args[1]["yaxis2"]["visible"] is False
+    assert buttons[1].args[1]["yaxis2"]["title"]["text"] == "SOC [%]"
 
 
 def test_plot_time_series_battery_soc_and_usecase_without_battery_columns() -> None:

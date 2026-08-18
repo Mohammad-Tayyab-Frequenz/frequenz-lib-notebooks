@@ -258,7 +258,7 @@ def test_send_email_with_attachments(
         len(file_open_calls) == 1
     ), f"Unexpected open calls: {mock_open.call_args_list}"
     mock_add_attachment.assert_called_once_with(
-        "",
+        "data",
         maintype="text",
         subtype="plain",
         filename="test_file.txt",
