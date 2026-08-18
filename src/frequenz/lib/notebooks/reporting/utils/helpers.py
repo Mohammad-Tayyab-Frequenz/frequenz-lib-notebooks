@@ -50,6 +50,7 @@ from frequenz.client.assets import AssetsApiClient
 from frequenz.client.common.microgrid import MicrogridId
 from frequenz.gridpool import MicrogridConfig
 
+from frequenz.lib.notebooks._credentials import resolve_credentials
 from frequenz.lib.notebooks.reporting.metrics.reporting_metrics import (
     asset_production,
     battery_power_flows,
@@ -86,8 +87,13 @@ def _resolved_assets_api_config(
 ) -> tuple[str, str | None, str | None]:
     """Resolve Assets API connection settings from args and environment."""
     resolved_server_url = server_url or os.getenv("ASSETS_API_URL")
-    resolved_auth_key = auth_key or os.getenv("API_KEY")
-    resolved_sign_secret = sign_secret or os.getenv("API_SECRET")
+    if auth_key is not None or sign_secret is not None:
+        resolved_auth_key = auth_key
+        resolved_sign_secret = sign_secret
+    else:
+        resolved_auth_key, resolved_sign_secret = resolve_credentials(
+            os.environ, "ASSETS_API"
+        )
 
     if not resolved_server_url:
         raise ValueError(
