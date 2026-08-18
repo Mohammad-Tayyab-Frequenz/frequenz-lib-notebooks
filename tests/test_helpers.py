@@ -285,6 +285,42 @@ async def test_get_meter_display_names_extracts_all_component_names() -> None:
         }
 
 
+@pytest.mark.asyncio
+async def test_get_meter_display_names_resolves_assets_api_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The async helper should use Assets-specific credentials from the env."""
+
+    class _FakeClient:
+        def __init__(
+            self,
+            server_url: str,
+            auth_key: str | None = None,
+            sign_secret: str | None = None,
+        ) -> None:
+            assert server_url == "grpc://assets.example.com:443"
+            assert auth_key == "assets-key"
+            assert sign_secret == "assets-secret"
+
+        async def list_microgrid_electrical_components(
+            self, microgrid_id: MicrogridId
+        ) -> list[object]:
+            assert microgrid_id == MicrogridId(241)
+            return []
+
+    monkeypatch.setenv("ASSETS_API_URL", "grpc://assets.example.com:443")
+    monkeypatch.setenv("FREQUENZ_API_KEY", "generic-key")
+    monkeypatch.setenv("FREQUENZ_API_SECRET", "generic-secret")
+    monkeypatch.setenv("ASSETS_API_KEY", "assets-key")
+    monkeypatch.setenv("ASSETS_API_SECRET", "assets-secret")
+    monkeypatch.setattr(
+        "frequenz.lib.notebooks.reporting.utils.helpers.AssetsApiClient",
+        _FakeClient,
+    )
+
+    assert await get_meter_display_names(241) == {}
+
+
 def test_set_date_to_midnight_creates_timezone_aware_midnight() -> None:
     """Date and datetime inputs both produce midnight timestamps in the target TZ."""
     result_date = set_date_to_midnight(date(2024, 5, 1), "Europe/Berlin")
