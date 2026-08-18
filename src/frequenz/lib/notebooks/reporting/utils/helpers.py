@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import warnings
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Any, Literal, Mapping, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -63,6 +64,26 @@ from frequenz.lib.notebooks.reporting.metrics.reporting_metrics import (
     production_self_usage,
 )
 from frequenz.lib.notebooks.reporting.utils.colors import COLOR_DICT
+from frequenz.lib.notebooks.reporting.utils.column_mapper import ColumnMapper
+
+SummaryPeriod = Literal["daily", "weekly", "monthly", "yearly"]
+
+
+@dataclass(frozen=True)
+class SummaryAggregateData:
+    """Prepared data for summary aggregate plotting."""
+
+    summary: pd.DataFrame
+    positive: pd.DataFrame
+    negative: pd.DataFrame
+
+
+_SUMMARY_PERIOD_RULES: dict[SummaryPeriod, str] = {
+    "daily": "1D",
+    "weekly": "1W",
+    "monthly": "1MS",
+    "yearly": "1YS",
+}
 
 AggregatedComponentConfig = Mapping[str, tuple[str, str]]
 
@@ -807,6 +828,91 @@ def build_color_map(
                 break
 
     return final
+
+
+def _date_index(index: pd.Index) -> pd.Index:
+    """Return an index containing the date part of a datetime-like index."""
+    return pd.Index(pd.DatetimeIndex(index).date)
+
+
+def prepare_summary_data(
+    df: pd.DataFrame, period: SummaryPeriod = "monthly"
+) -> SummaryAggregateData:
+    """Aggregate power data into MWh totals for summary plotting.
+
+    Args:
+        df: Input time-series DataFrame with a ``DatetimeIndex`` or a
+            ``timestamp`` column.
+        period: Aggregation period: ``daily``, ``weekly``, ``monthly``, or
+            ``yearly``.
+
+    Returns:
+        The aggregated summary data split into positive and negative values.
+
+    Raises:
+        TypeError: If ``df`` does not have a timestamp index or column.
+        ValueError: If fewer than two rows are provided or ``period`` is unknown.
+    """
+    source_input = df.copy()
+    if not isinstance(source_input.index, pd.DatetimeIndex):
+        if "timestamp" not in source_input.columns:
+            raise TypeError("DataFrame must have a DatetimeIndex or timestamp column.")
+        source_input = source_input.set_index(pd.to_datetime(source_input["timestamp"]))
+    if len(source_input.index) < 2:
+        raise ValueError(
+            "At least two data points are required for summary aggregation."
+        )
+    if period not in _SUMMARY_PERIOD_RULES:
+        raise ValueError(
+            f"Unsupported summary period: {period!r}. "
+            f"Expected one of {sorted(_SUMMARY_PERIOD_RULES)}."
+        )
+
+    mapper = ColumnMapper.from_default(locale="de")
+    labels = mapper.canonical_to_display
+    source_df = mapper.to_canonical(source_input).select_dtypes(include="number")
+    if "pv" in source_df.columns and "pv_asset_production" not in source_df.columns:
+        source_df["pv_asset_production"] = source_df["pv"]
+    resolution = (source_input.index[1] - source_input.index[0]).total_seconds()
+    kw_to_mwh = resolution / 3600 / 1000
+    resample_rule = _SUMMARY_PERIOD_RULES[period]
+    positive_columns = [
+        "grid_consumption",
+        "mid_consumption",
+        "battery_charge",
+    ]
+    negative_columns = [
+        "grid_feed_in",
+        "battery_discharge",
+        "pv_asset_production",
+        "chp_asset_production",
+        "wind_asset_production",
+    ]
+
+    def _period_sum(series: pd.Series) -> pd.Series:
+        numeric_series = pd.to_numeric(series, errors="coerce")
+        result: pd.Series = numeric_series.resample(resample_rule).sum()
+        result = result.mul(kw_to_mwh)
+        result.index = _date_index(result.index)
+        return result
+
+    index = _date_index(source_df.resample(resample_rule).sum(numeric_only=True).index)
+    positive = pd.DataFrame(index=index)
+    negative = pd.DataFrame(index=index)
+
+    for column in positive_columns:
+        if column in source_df.columns:
+            positive[labels[column]] = _period_sum(source_df[column])
+
+    for column in negative_columns:
+        if column in source_df.columns:
+            negative[labels[column]] = _period_sum(-source_df[column].abs())
+
+    positive = positive.loc[:, positive.abs().sum(axis=0) > 0]
+    negative = negative.loc[:, negative.abs().sum(axis=0) > 0]
+    summary = pd.concat([positive, negative], axis=1)
+
+    return SummaryAggregateData(summary=summary, positive=positive, negative=negative)
 
 
 def fill_aggregated_component_columns(
