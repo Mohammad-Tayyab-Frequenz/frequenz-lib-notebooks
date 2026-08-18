@@ -25,8 +25,6 @@ import logging
 from dataclasses import dataclass, field, fields
 from typing import Any, Type, TypeVar
 
-import matplotlib.pyplot as plt
-
 from frequenz.lib.notebooks.solar.maintenance.translator import TranslationManager
 
 _logger = logging.getLogger(__name__)
@@ -114,14 +112,14 @@ class RollingViewConfig(BaseViewConfig):
     )
 
     primary_colour: str = field(
-        default=plt.rcParams["lines.color"],
+        default="#000000",
         metadata={
             "description": "Primary colour to use for the plot",
         },
     )
 
     cmap_name: str = field(
-        default=plt.rcParams["image.cmap"],
+        default="freqstrom",
         metadata={
             "description": "Name of the colormap to use",
         },
@@ -155,7 +153,7 @@ class ProfileViewConfig(BaseViewConfig):
     )
 
     cmap_name: str = field(
-        default=plt.rcParams["image.cmap"],
+        default="freqstrom",
         metadata={
             "description": "Name of the colormap to use",
         },
@@ -181,7 +179,7 @@ class DailyViewConfig(BaseViewConfig):
     )
 
     colour: str = field(
-        default=plt.rcParams["lines.color"],
+        default="#000000",
         metadata={
             "description": "Colour to use for the daily production plot",
         },

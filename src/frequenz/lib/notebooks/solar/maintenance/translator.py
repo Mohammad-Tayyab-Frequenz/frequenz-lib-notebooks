@@ -89,6 +89,8 @@ class TranslationManager:
         },
         "mean": {"de": "Durchschnitt"},
         "median": {"de": "Median"},
+        "min-max": {"de": "Min-Max"},
+        "q1-q3": {"de": "Q1-Q3"},
         "current {value}-day cycle": {"de": "Aktueller {value}-Tage-Zyklus"},
         "current {value}-hour cycle": {"de": "Aktueller {value}-Stunden-Zyklus"},
         "1 cycle ago": {"de": "Vor 1 Zyklus"},
