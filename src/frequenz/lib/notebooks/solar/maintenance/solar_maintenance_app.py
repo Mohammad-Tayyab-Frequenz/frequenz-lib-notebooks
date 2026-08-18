@@ -20,13 +20,11 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import pvlib
 from dotenv import load_dotenv
-from matplotlib.axes import Axes
-from matplotlib.patches import Patch
 from numpy.typing import NDArray
 from pandas import Series
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
@@ -40,8 +38,14 @@ from frequenz.lib.notebooks.solar.maintenance.data_fetch import (
     transform_weather_data,
 )
 from frequenz.lib.notebooks.solar.maintenance.models import prepare_prediction_models
-from frequenz.lib.notebooks.solar.maintenance.plot_manager import PlotManager
-from frequenz.lib.notebooks.solar.maintenance.plot_styles import style_table
+from frequenz.lib.notebooks.solar.maintenance.plot_manager import (
+    PlotlyAxis,
+    PlotManager,
+)
+from frequenz.lib.notebooks.solar.maintenance.plot_styles import (
+    PlotlyColourScale,
+    style_table,
+)
 from frequenz.lib.notebooks.solar.maintenance.plotter import (
     DailyPlotter,
     ProfilePlotter,
@@ -68,6 +72,22 @@ if TYPE_CHECKING:
     SeriesFloat = Series[float]
 else:
     SeriesFloat = pd.Series  # Treated generically at runtime.
+
+
+def _format_hover_x_value(value: Any) -> Any:
+    """Return a single-line x-axis value for Plotly hover labels.
+
+    Args:
+        value: A single x-axis value. Strings may contain line breaks from the
+            compact tick-label formatter.
+
+    Returns:
+        The original non-string value, or a string with line breaks collapsed so
+        Plotly hovers display the full date.
+    """
+    if not isinstance(value, str):
+        return value
+    return " ".join(part for part in value.splitlines() if part)
 
 
 @dataclass
@@ -253,6 +273,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
     # initialize the output data structure
     output = SolarAnalysisData()
     production_table_view_list = []
+    plot_managers: list[PlotManager] = []
     # pylint: disable-next=too-many-nested-blocks
     for mid in reporting_data.microgrid_id.unique():
         _logger.info("Generating plots for microgrid ID: %s", mid)
@@ -446,7 +467,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
                 figures_and_axes["fig_short_term"]["axes"][0],
                 recent_y,
             )
-            patch = Patch(color=plot_settings["patch_colour"], label=patch_label)
+            patch = plot_settings["patch_colour"]
         figures_and_axes["fig_short_term"]["axes"][0].set_ylabel(
             figures_and_axes["fig_short_term"]["ylabel"]
         )
@@ -463,7 +484,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
         if plot_settings["show_annotation"]:
             recent_y = rolling_view_long_term[long_term_view_col_to_plot].iloc[-1]
             _annotate_last_point(figures_and_axes["fig_long_term"]["axes"][0], recent_y)
-            patch = Patch(color=plot_settings["patch_colour"], label=patch_label)
+            patch = plot_settings["patch_colour"]
         figures_and_axes["fig_long_term"]["axes"][0].set_ylabel(
             figures_and_axes["fig_long_term"]["ylabel"]
         )
@@ -478,7 +499,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
         if plot_settings["show_annotation"]:
             recent_y = daily_production_view[long_term_view_col_to_plot].iloc[-1]
             _annotate_last_point(figures_and_axes["fig_long_term"]["axes"][2], recent_y)
-            patch = Patch(color=plot_settings["patch_colour"], label=patch_label)
+            patch = plot_settings["patch_colour"]
 
         # rolling view with rolling average
         plotter_rolling_view_average = RollingPlotter(rolling_view_average_config)
@@ -490,7 +511,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
         if plot_settings["show_annotation"]:
             recent_y = rolling_view_average[long_term_view_col_to_plot].iloc[-1]
             _annotate_last_point(figures_and_axes["fig_long_term"]["axes"][1], recent_y)
-            patch = Patch(color=plot_settings["patch_colour"], label=patch_label)
+            patch = plot_settings["patch_colour"]
         figures_and_axes["fig_long_term"]["axes"][1].set_ylabel(
             figures_and_axes["fig_long_term"]["ylabel"]
         )
@@ -509,7 +530,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
             # the plotter automatically hides the axis when data is empty
             # but we need to deal with the figure itself
             # we can safely clear the figure like this because it only plots rolling_view_real_time
-            figures_and_axes["fig_real_time"]["figure"].clf()
+            figures_and_axes["fig_real_time"]["figure"].data = ()
         else:
             if plot_settings["show_annotation"]:
                 if len(real_time_view_col_to_plot) == 1:
@@ -518,9 +539,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
                         _annotate_last_point(
                             figures_and_axes["fig_real_time"]["axes"][0], recent_y
                         )
-                        patch = Patch(
-                            color=plot_settings["patch_colour"], label=patch_label
-                        )
+                        patch = plot_settings["patch_colour"]
             figures_and_axes["fig_real_time"]["axes"][0].set_ylabel(
                 real_time_view_ylabel
             )
@@ -645,7 +664,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
         # -------------------------------- #
         for i, (mdl_name, model_items) in enumerate(prediction_models.items()):
             n_models = len(prediction_models)
-            cmap = plt.get_cmap(plt.rcParams["image.cmap"])
+            cmap = PlotlyColourScale(plot_settings["colormap_name"])
             cmap_values = np.linspace(0.1, 0.9, n_models)
 
             x_axis_short_term_view = rolling_view_short_term[
@@ -674,8 +693,6 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
                 predictions_to_plot = [predictions]
 
             elif model_specs[mdl_name]["target_label"] == long_term_view_col_to_plot:
-                ax = [figures_and_axes["fig_long_term"]["axes"][0]]
-
                 predictions = (
                     model_items["predictions"]
                     .shift(1)
@@ -687,7 +704,8 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
                 rolling_view_long_term[f"predictions_{mdl_name}"] = predictions[
                     "predictions"
                 ]
-                predictions_to_plot = [predictions]
+                ax = []
+                predictions_to_plot = []
 
             else:
                 ax = [
@@ -739,22 +757,45 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
                 custom_xtick_labels = [
                     tick.get_text() for tick in _ax.get_xticklabels()
                 ]
-                preds.plot(
-                    ax=_ax,
-                    x=base_view_config_params["x_axis_label"],
-                    y="predictions",
-                    style="" if mdl_name == "simulation" else "s--",
-                    kind="area" if mdl_name == "simulation" else "line",
-                    color=(
-                        cmap(cmap.N - 1)
-                        if mdl_name == "simulation"
-                        else cmap(cmap_values[i])
-                    ),
-                    label=tm.translate(mdl_name),
-                    legend=False,
-                    alpha=1 if mdl_name == "simulation" else 0.7,
-                    zorder=0 if mdl_name == "simulation" else 2,
+                plot_color = (
+                    cmap(cmap.n_colours - 1)
+                    if mdl_name == "simulation"
+                    else cmap(cmap_values[i])
                 )
+                if mdl_name == "simulation":
+                    _ax.add_trace(
+                        go.Scatter(
+                            x=[
+                                _format_hover_x_value(value)
+                                for value in preds[
+                                    base_view_config_params["x_axis_label"]
+                                ]
+                            ],
+                            y=preds["predictions"],
+                            mode="lines",
+                            fill="tozeroy",
+                            line={"color": plot_color},
+                            name=tm.translate(mdl_name),
+                            opacity=1,
+                        )
+                    )
+                else:
+                    _ax.add_trace(
+                        go.Scatter(
+                            x=[
+                                _format_hover_x_value(value)
+                                for value in preds[
+                                    base_view_config_params["x_axis_label"]
+                                ]
+                            ],
+                            y=preds["predictions"],
+                            mode="lines+markers",
+                            line={"color": plot_color, "dash": "dash"},
+                            marker={"symbol": "square"},
+                            name=tm.translate(mdl_name),
+                            opacity=0.7,
+                        )
+                    )
                 _ax.set_xticklabels(custom_xtick_labels)
                 _ax.set_xlabel(current_xlabel)
                 _ax.set_ylabel(current_ylabel)
@@ -827,6 +868,7 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
         # -------------------------------- #
         for fig in figures_and_axes.keys():
             plot_manager.adjust_axes_spacing(fig_id=fig, pixels=100.0)
+        plot_managers.append(plot_manager)
 
         output.real_time_view[mid] = (
             pd.DataFrame() if data_higher_fs.empty else rolling_view_real_time
@@ -844,6 +886,8 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
     else:
         production_table_view = pd.DataFrame()
     output.production_table_view = production_table_view
+    for plot_manager in plot_managers:
+        plot_manager.show_all()
     return output
 
 
@@ -943,7 +987,7 @@ def _create_plot_layout(  # pylint: disable=too-many-arguments
     plot_settings = {
         "colormap_name": colormap_name,
         "primary_colour": plot_manager.get_style_attribute("lines.color"),
-        "patch_colour": plt.get_cmap(colormap_name)(-1),
+        "patch_colour": PlotlyColourScale(colormap_name)(-1),
         "legend_update_on": legend_update_on,
         "legend_kwargs": {
             "figure": {  # ensure legend is placed at the bottom of the figure
@@ -973,11 +1017,12 @@ def _create_plot_layout(  # pylint: disable=too-many-arguments
     )
 
     fig_size_base = plot_manager.get_style_attribute("figure.figsize")
+    fig_width, subplot_height = fig_size_base
     plot_layout_specs = {
         "fig_real_time": {
             "nrows": 1,
             "ncols": 1,
-            "figsize": fig_size_base,
+            "figsize": (fig_width, subplot_height),
             "title": translation_manager.translate(
                 "Real-time View (All times are in {value})",
                 value=translation_manager.translate(timezone),
@@ -987,7 +1032,7 @@ def _create_plot_layout(  # pylint: disable=too-many-arguments
         "fig_short_term": {
             "nrows": subplots_short_term,
             "ncols": 1,
-            "figsize": (fig_size_base[0], fig_size_base[1] + 2.5 * subplots_short_term),
+            "figsize": (fig_width, subplot_height * subplots_short_term),
             "title": translation_manager.translate(
                 "Short-term View (All times are in {value})",
                 value=translation_manager.translate(timezone),
@@ -999,7 +1044,7 @@ def _create_plot_layout(  # pylint: disable=too-many-arguments
         "fig_long_term": {
             "nrows": subplots_long_term,
             "ncols": 1,
-            "figsize": (fig_size_base[0], fig_size_base[1] + 2.5 * subplots_long_term),
+            "figsize": (fig_width, subplot_height * subplots_long_term),
             "title": translation_manager.translate(
                 "Long-term View (All times are in {value})",
                 value=translation_manager.translate(timezone),
@@ -1030,7 +1075,7 @@ def _create_plot_layout(  # pylint: disable=too-many-arguments
         for fig_id, specs in plot_layout_specs.items()
     }
     for fig_info in figures_and_axes.values():
-        fig_info["figure"].suptitle(fig_info["title"])
+        fig_info["figure"].update_layout(title_text=fig_info["title"])
     return figures_and_axes, data_column_labels_to_plot, plot_settings
 
 
@@ -1076,12 +1121,12 @@ def _filter_and_rename_columns(
 
 
 def _annotate_last_point(
-    ax: Axes, recent_y: float, patch_colour: Color | None = "lightgray"
+    ax: PlotlyAxis, recent_y: float, patch_colour: Color | None = "lightgray"
 ) -> None:
     """Annotate the last point in the plot.
 
     Args:
-        ax: The matplotlib axis to plot the data.
+        ax: The Plotly subplot reference to annotate.
         recent_y: The y-value of the most recent data point.
         patch_colour: The colour for the annotation patch.
     """

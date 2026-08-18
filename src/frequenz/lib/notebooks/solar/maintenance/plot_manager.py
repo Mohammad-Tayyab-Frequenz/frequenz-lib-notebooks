@@ -1,36 +1,31 @@
 # License: MIT
 # Copyright © 2025 Frequenz Energy-as-a-Service GmbH
 
-"""
-Plot Manager Module.
+"""Plotly figure management for solar maintenance plots.
 
-This module provides the PlotManager class, which is designed to manage the
-creation and layout of matplotlib figures and axes. It offers an organized and
-extensible way to create complex plot layouts with both simple subplots and
-advanced GridSpec layouts.
+This module provides a small Plotly-based plotting manager used by the solar
+maintenance workflow. It owns Plotly figures, creates subplot layouts, applies
+the project plot theme, updates legends, displays figures in notebooks, and
+saves generated plots as standalone HTML files.
 
-The PlotManager class allows users to:
-- Create figures with specified rows and columns of subplots.
-- Create figures with GridSpec layouts for advanced subplot arrangements.
-- Retrieve specific axes for plotting.
-- Update legends for figures based on specified axes and configurations.
-- Apply predefined plot styles to the figures.
-- Display and save all managed figures.
+The :class:`PlotlyAxis` wrapper intentionally exposes the small subset of the
+Matplotlib ``Axes`` API that the solar plotters already use. This keeps the
+plotter code focused on domain plotting while allowing the rendering backend to
+be Plotly.
 """
 
 import logging
 import os
 from contextlib import contextmanager
-from typing import Any, Generator, TypeGuard, cast
+from dataclasses import dataclass, field
+from typing import Any, Callable, Generator, cast
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib import gridspec
-from matplotlib.axes import Axes
-from matplotlib.colors import ListedColormap
-from matplotlib.figure import Figure
+import plotly.graph_objects as go
+from IPython.display import display
+from plotly.subplots import make_subplots
 
 _logger = logging.getLogger(__name__)
+_display_figure = cast(Callable[[go.Figure], None], display)
 
 TextModificationType = str | None
 ReplaceLabelType = dict[str, str] | None
@@ -38,295 +33,378 @@ AdditionalItemsType = list[tuple[Any, str]] | None
 AnyModificationType = AdditionalItemsType | TextModificationType | ReplaceLabelType
 ModificationType = dict[str, AnyModificationType]
 
+FREQUENZ_COLOURS = [
+    "#000000",
+    "#00FFCE",
+    "#600DFF",
+    "#F42784",
+    "#00AEEF",
+    "#FFC200",
+    "#1A1A1A",
+    "#393939",
+    "#585858",
+    "#777777",
+    "#979797",
+    "#B6B6B6",
+    "#D5D5D5",
+    "#F4F4F4",
+]
 
-class PlotManager:
-    """
-    A class to manage the creation and layout of matplotlib figures and axes.
 
-    Attributes:
-        figures: A dictionary to store figure handles.
-        axes: A dictionary to store axes handles.
-        current_style_params: A dictionary to store the current style parameters.
+@dataclass
+class PlotlyTickLabel:
+    """Small compatibility object for legacy tick-label reads."""
 
-    Methods:
-        apply_plot_theme: Apply a predefined style to the plots.
-        create_figure: Create a new figure with the specified number of rows
-            and columns of subplots.
-        create_multiple_figures: Create multiple figures with the specified
-            parameters.
-        create_gridspec_figure: Create a new figure with a GridSpec layout.
-        create_multiple_gridspec_figures: Create multiple GridSpec figures with
-            the specified parameters.
-        update_legend: Update legend for a matplotlib figure based on specified
-            axes and additional configurations.
-        get_style_attribute: Retrieve a specific style attribute.
-        get_all_style_attributes: Retrieve all current style attributes.
-        get_axes: Retrieve the axes for a given figure and axis index.
-        get_figure: Retrieve the figure handle for a given figure ID.
-        show_all: Display all the figures managed by PlotManager.
-        save_all: Save all the figures managed by PlotManager to the specified
-            directory.
-        manage_figure: Context manager to handle showing and optionally saving
-            figures automatically.
+    text: str
 
-    Example usage:
-        plot_manager = PlotManager()
+    def get_text(self) -> str:
+        """Return the stored tick label text.
 
-        # Create a simple figure with 1 row and 2 columns of subplots
-        plot_manager.create_figure('fig1', nrows=1, ncols=2)
+        Returns:
+            The tick label text.
+        """
+        return self.text
 
-        # Retrieve the axes for the subplots and plot data
-        ax1 = plot_manager.get_axes('fig1', 0)
-        ax2 = plot_manager.get_axes('fig1', 1)
 
-        ax1.plot([1, 2, 3], [4, 5, 6])
-        ax1.set_title('Plot 1')
+class PlotlyLegend:
+    """Compatibility object for legacy legend visibility calls."""
 
-        ax2.plot([3, 2, 1], [6, 5, 4])
-        ax2.set_title('Plot 2')
-
-        # Display all figures
-        plot_manager.show_all()
-
-        # Save all figures to the 'plots' directory
-        plot_manager.save_all('plots')
-
-        # Create a figure with a GridSpec layout
-        plot_manager.create_gridspec_figure('fig2', nrows=2, ncols=2,
-            gridspec_kwargs=dict(height_ratios=[1, 2], width_ratios=[2, 1]))
-
-        # Display all figures
-        plot_manager.show_all()
-
-        # Save all figures to the 'plots' directory
-        plot_manager.save_all('plots')
-
-        # Creating multiple figures without context manager
-        fig_params = [
-            {'fig_id': 'fig1', 'nrows': 1, 'ncols': 2, 'figsize': (10, 6)},
-            {'fig_id': 'fig2', 'nrows': 2, 'ncols': 2, 'figsize': (12, 8)}
-        ]
-        plot_manager.create_multiple_figures(fig_params)
-
-        # Using context manager without saving
-        with plot_manager.manage_figure('fig3'):
-            plot_manager.create_figure('fig3', nrows=1, ncols=2)
-            ax1 = plot_manager.get_axes('fig3', 0)
-            ax2 = plot_manager.get_axes('fig3', 1)
-
-            ax1.plot([1, 2, 3], [4, 5, 6])
-            ax1.set_title('Plot 1')
-
-            ax2.plot([3, 2, 1], [6, 5, 4])
-            ax2.set_title('Plot 2')
-    """
-
-    def __init__(self, theme: str = "frequenz-neustrom"):
-        """Initialize a PlotManager instance and optionally apply a plot style.
+    def set_visible(self, visible: bool) -> None:
+        """Ignore Matplotlib-style legend visibility changes.
 
         Args:
-            theme: The name of the plot style to apply.
+            visible: Requested visibility state. The value is accepted for API
+                compatibility and ignored because Plotly legend visibility is
+                handled on traces and layout.
         """
-        self.figures: dict[str, Figure] = {}
-        self.axes: dict[str, list[Axes]] = {}
-        self.current_style_params: dict[str, Any] = {}
+        del visible
 
-        # Register a custom colormap for Frequenz-Neustrom
-        self._freqstrom_cmap_name = "freqstrom"
-        self._freqstrom_cmap_primary_colour = "#000000"
-        try:
-            mpl.colormaps[self._freqstrom_cmap_name]
-        except KeyError:
-            my_cmap = ListedColormap(
-                [
-                    self._freqstrom_cmap_primary_colour,
-                    "#00FFCE",
-                    "#600DFF",
-                    "#F42784",
-                    "#00AEEF",
-                    "#FFC200",
-                    "#1A1A1A",
-                    "#393939",
-                    "#585858",
-                    "#777777",
-                    "#979797",
-                    "#B6B6B6",
-                    "#D5D5D5",
-                    "#F4F4F4",
-                ]
+
+# pylint: disable=too-many-instance-attributes, too-many-locals, too-many-arguments
+@dataclass
+class PlotlyAxis:
+    """A single subplot reference in a Plotly figure."""
+
+    figure: go.Figure
+    row: int = 1
+    col: int = 1
+    visible: bool = True
+    labels: list[str] = field(default_factory=list)
+    x_label: str = ""
+    y_label: str = ""
+    xticklabels: list[str] = field(default_factory=list)
+
+    def add_trace(self, trace: Any) -> None:
+        """Add a Plotly trace to this subplot.
+
+        Args:
+            trace: A Plotly trace object to attach to this axis' row and column.
+        """
+        if getattr(trace, "name", None) and getattr(trace, "showlegend", None) is None:
+            trace.showlegend = True
+        self.figure.add_trace(trace, row=self.row, col=self.col)
+        name = getattr(trace, "name", None)
+        if name:
+            self.labels.append(str(name))
+
+    def plot(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:
+        """Add line traces using the Matplotlib-style arguments used here.
+
+        Args:
+            x: X-axis values shared by all plotted series.
+            y: One or more y-axis series. Two-dimensional inputs are split into
+                one Plotly trace per series.
+            *args: Optional Matplotlib-style format strings, such as ``"o-"``.
+            **kwargs: Supported plotting options. The solar plotters currently
+                use ``label``, ``color``, ``style``, and ``alpha``.
+        """
+        style = str(kwargs.get("style", ""))
+        if args:
+            style += "".join(str(arg) for arg in args)
+        name = kwargs.get("label")
+        color = kwargs.get("color")
+        line_dash = "dot" if "--" in style else None
+        marker = (
+            "markers" if any(marker in style for marker in ["o", "s", "D"]) else None
+        )
+        mode = "lines+markers" if marker else "lines"
+        opacity = kwargs.get("alpha")
+        y_values = getattr(y, "T", [y])
+        if getattr(y, "ndim", 1) == 1:
+            y_values = [y]
+        for idx, series in enumerate(y_values):
+            trace_name = name[idx] if isinstance(name, list) else name
+            trace_color = color[idx] if isinstance(color, list) else color
+            self.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=series,
+                    mode=mode,
+                    name=trace_name,
+                    line={"color": trace_color, "dash": line_dash, "width": 1.3},
+                    opacity=opacity,
+                )
             )
-            mpl.colormaps.register(cmap=my_cmap, name=self._freqstrom_cmap_name)
 
+    def fill_between(
+        self,
+        x: Any,
+        y_lower: Any,
+        y_upper: Any,
+        *,
+        color: str | None = None,
+        alpha: float | None = None,
+        label: str | None = None,
+        **_: Any,
+    ) -> None:
+        """Add a filled band between two curves.
+
+        Args:
+            x: X-axis values for both boundary curves.
+            y_lower: Lower boundary values.
+            y_upper: Upper boundary values.
+            color: Fill and boundary color.
+            alpha: Fill opacity.
+            label: Legend label for the filled band.
+            **_: Additional Matplotlib-style keyword arguments accepted for
+                compatibility and ignored.
+        """
+        self.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_upper,
+                mode="lines",
+                line={"width": 0, "color": color},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        self.add_trace(
+            go.Scatter(
+                x=x,
+                y=y_lower,
+                mode="lines",
+                fill="tonexty",
+                fillcolor=color,
+                line={"width": 0, "color": color},
+                name=label,
+                opacity=alpha,
+            )
+        )
+
+    def annotate(self, text: str, **_: Any) -> None:
+        """Add an annotation near the top-right of this subplot.
+
+        Args:
+            text: Annotation text.
+            **_: Additional Matplotlib-style annotation arguments accepted for
+                compatibility and ignored.
+        """
+        self.figure.add_annotation(
+            text=text,
+            xref="paper",
+            yref="paper",
+            x=0.95,
+            y=0.95,
+            showarrow=False,
+            bgcolor="lightgray",
+            row=self.row,
+            col=self.col,
+        )
+
+    def set_visible(self, visible: bool) -> None:
+        """Set whether this subplot is considered visible.
+
+        Args:
+            visible: Whether downstream layout and legend handling should treat
+                this subplot as visible.
+        """
+        self.visible = visible
+
+    def get_visible(self) -> bool:
+        """Return whether this subplot should be considered visible.
+
+        Returns:
+            ``True`` if this subplot is marked visible, otherwise ``False``.
+        """
+        return self.visible
+
+    def set_title(self, title: str) -> None:
+        """Set the subplot title.
+
+        Args:
+            title: Text to place above this subplot.
+        """
+        self.figure.update_xaxes(title_text=self.x_label, row=self.row, col=self.col)
+        self.figure.add_annotation(
+            text=title,
+            xref=f"x{self.axis_suffix()} domain",
+            yref=f"y{self.axis_suffix()} domain",
+            x=0.5,
+            y=1.08,
+            showarrow=False,
+            font={"size": 16},
+        )
+
+    def set_xlabel(self, label: str) -> None:
+        """Set the x-axis label.
+
+        Args:
+            label: X-axis label text.
+        """
+        self.x_label = label
+        self.figure.update_xaxes(title_text=label, row=self.row, col=self.col)
+
+    def get_xlabel(self) -> str:
+        """Return the x-axis label.
+
+        Returns:
+            The x-axis label text.
+        """
+        return self.x_label
+
+    def set_ylabel(self, label: str) -> None:
+        """Set the y-axis label.
+
+        Args:
+            label: Y-axis label text.
+        """
+        self.y_label = label
+        self.figure.update_yaxes(title_text=label, row=self.row, col=self.col)
+
+    def get_ylabel(self) -> str:
+        """Return the y-axis label.
+
+        Returns:
+            The y-axis label text.
+        """
+        return self.y_label
+
+    def set_xlim(self, value: tuple[Any, Any]) -> None:
+        """Set the x-axis range.
+
+        Args:
+            value: Lower and upper range bounds.
+        """
+        self.figure.update_xaxes(range=list(value), row=self.row, col=self.col)
+
+    def set_ylim(self, value: tuple[Any, Any]) -> None:
+        """Set the y-axis range.
+
+        Args:
+            value: Lower and upper range bounds.
+        """
+        self.figure.update_yaxes(range=list(value), row=self.row, col=self.col)
+
+    def set_xticks(self, ticks: list[int]) -> None:
+        """Set x-axis tick positions.
+
+        Args:
+            ticks: Tick values to display. For category axes these values must
+                match the trace x values, not only the compact tick labels.
+        """
+        self.figure.update_xaxes(
+            tickmode="array",
+            tickvals=ticks,
+            type="category",
+            unifiedhovertitle={"text": "%{x}"},
+            row=self.row,
+            col=self.col,
+        )
+
+    def set_xticklabels(self, labels: list[str]) -> None:
+        """Set compact x-axis tick labels.
+
+        Args:
+            labels: Display labels for the configured tick values.
+        """
+        self.xticklabels = labels
+        self.figure.update_xaxes(
+            ticktext=labels,
+            type="category",
+            unifiedhovertitle={"text": "%{x}"},
+            row=self.row,
+            col=self.col,
+        )
+
+    def get_xticklabels(self) -> list[PlotlyTickLabel]:
+        """Return current x tick labels as compatibility objects.
+
+        Returns:
+            Tick labels wrapped in objects exposing ``get_text()``.
+        """
+        return [PlotlyTickLabel(text) for text in self.xticklabels]
+
+    def get_legend_handles_labels(self) -> tuple[list[Any], list[str]]:
+        """Return compatibility legend handles and labels.
+
+        Returns:
+            A tuple of placeholder handles and collected trace labels.
+        """
+        return [None] * len(self.labels), self.labels
+
+    def legend(self, *_: Any, **__: Any) -> PlotlyLegend:
+        """Return a compatibility legend object.
+
+        Args:
+            *_: Positional Matplotlib-style legend arguments accepted for
+                compatibility and ignored.
+            **__: Keyword Matplotlib-style legend arguments accepted for
+                compatibility and ignored.
+
+        Returns:
+            A ``PlotlyLegend`` object that accepts Matplotlib-style visibility
+            calls.
+        """
+        return PlotlyLegend()
+
+    def axis_suffix(self) -> str:
+        """Return the Plotly axis suffix for this subplot.
+
+        Returns:
+            An empty string for the first subplot and the numeric Plotly axis
+            suffix for subsequent subplots.
+        """
+        index = (self.row - 1) + self.col
+        return "" if index == 1 else str(index)
+
+
+class PlotManager:
+    """Manage Plotly figures and subplot references."""
+
+    def __init__(self, theme: str = "frequenz-neustrom"):
+        """Initialize a PlotManager instance and apply a plot theme.
+
+        Args:
+            theme: Name of the plot theme to use for newly created figures.
+        """
+        self.figures: dict[str, go.Figure] = {}
+        self.axes: dict[str, list[PlotlyAxis]] = {}
+        self.current_style_params: dict[str, Any] = {}
         self.apply_plot_theme(theme)
         _logger.info("PlotManager initialised with theme: %s", theme)
 
     def apply_plot_theme(self, theme: str) -> None:
-        """Apply a predefined style to the plots.
+        """Apply a predefined Plotly theme.
 
         Args:
-            theme: The name of the plot theme to apply.
+            theme: Name of the theme to apply.
 
         Raises:
-            ValueError: If the specified theme is not recognized
+            ValueError: If the theme name is not supported.
         """
-        themes: dict[str, dict[str, Any]] = {
-            "frequenz-neustrom": {
-                "base": {"base_theme": "seaborn-v0_8-white"},
-                "params": {
-                    "axes.edgecolor": "0.8",
-                    "axes.facecolor": "white",
-                    "axes.grid": False,
-                    "axes.grid.which": "both",
-                    "axes.labelcolor": "black",
-                    "axes.labelsize": 20,
-                    "axes.linewidth": 1.5,
-                    "axes.spines.bottom": True,
-                    "axes.spines.left": True,
-                    "axes.spines.right": False,
-                    "axes.spines.top": False,
-                    "axes.titlecolor": "black",
-                    "axes.titlesize": 22,
-                    "figure.dpi": 100,
-                    "figure.figsize": (20, 12),
-                    "figure.titlesize": 25,
-                    "figure.titleweight": "bold",
-                    "font.family": ["Roboto", "HelveticaNeue", "Arial", "sans-serif"],
-                    "font.size": 14,
-                    "grid.color": "0.8",
-                    "grid.linestyle": "--",
-                    "grid.linewidth": 0.8,
-                    "image.cmap": self._freqstrom_cmap_name,
-                    "legend.fontsize": 18,
-                    "lines.color": self._freqstrom_cmap_primary_colour,
-                    "lines.linewidth": 2,
-                    "lines.marker": "o",
-                    "lines.markersize": 6,
-                    "savefig.format": "png",
-                    "text.color": "black",
-                    "xtick.color": "black",
-                    "xtick.labelsize": 18,
-                    "ytick.color": "black",
-                    "ytick.labelsize": 18,
-                },
-            },
-            "elegant-minimalist": {
-                "base": {"base_theme": "seaborn-v0_8-whitegrid"},
-                "params": {
-                    "axes.edgecolor": "0.8",
-                    "axes.facecolor": "white",
-                    "axes.grid": True,
-                    "axes.grid.which": "both",
-                    "axes.labelcolor": "black",
-                    "axes.labelsize": 14,
-                    "axes.linewidth": 1.5,
-                    "axes.spines.bottom": True,
-                    "axes.spines.left": True,
-                    "axes.spines.right": False,
-                    "axes.spines.top": False,
-                    "axes.titlecolor": "black",
-                    "axes.titlesize": 16,
-                    "figure.dpi": 100,
-                    "figure.figsize": (20, 12),
-                    "figure.titlesize": 19,
-                    "figure.titleweight": "bold",
-                    "font.family": "sans-serif",
-                    "font.size": 14,
-                    "grid.color": "0.8",
-                    "grid.linestyle": "--",
-                    "grid.linewidth": 0.8,
-                    "image.cmap": "viridis",
-                    "legend.fontsize": 12,
-                    "lines.color": "black",
-                    "lines.linewidth": 2,
-                    "lines.marker": "o",
-                    "lines.markersize": 6,
-                    "savefig.format": "png",
-                    "text.color": "black",
-                    "xtick.color": "black",
-                    "xtick.labelsize": 12,
-                    "ytick.color": "black",
-                    "ytick.labelsize": 12,
-                },
-            },
-            "vibrant": {
-                "base": {"base_theme": "seaborn-v0_8-bright"},
-                "params": {
-                    "axes.axisbelow": True,
-                    "axes.edgecolor": "gray",
-                    "axes.facecolor": "white",
-                    "axes.grid": True,
-                    "axes.labelcolor": "black",
-                    "axes.titlesize": 16,
-                    "figure.facecolor": "white",
-                    "figure.figsize": (20, 12),
-                    "figure.titlesize": 19,
-                    "figure.titleweight": "bold",
-                    "font.family": "sans-serif",
-                    "font.sans-serif": ["Comic Sans MS"],
-                    "font.size": 14,
-                    "grid.color": "silver",
-                    "grid.linestyle": "-",
-                    "image.cmap": "turbo",
-                    "legend.borderaxespad": 0.5,
-                    "legend.edgecolor": "black",
-                    "legend.facecolor": "white",
-                    "legend.fontsize": 12,
-                    "legend.frameon": True,
-                    "legend.loc": "best",
-                    "lines.color": "black",
-                    "lines.linewidth": 3,
-                    "text.color": "black",
-                    "xtick.color": "black",
-                    "ytick.color": "black",
-                },
-            },
-            "classic": {
-                "base": {"base_theme": "classic"},
-                "params": {
-                    "axes.edgecolor": "black",
-                    "axes.facecolor": "white",
-                    "axes.grid": False,
-                    "axes.labelcolor": "black",
-                    "axes.labelsize": 12,
-                    "axes.linewidth": 1,
-                    "axes.spines.bottom": True,
-                    "axes.spines.left": True,
-                    "axes.spines.right": True,
-                    "axes.spines.top": True,
-                    "axes.titlecolor": "black",
-                    "axes.titlesize": 16,
-                    "axes.titleweight": "normal",
-                    "figure.dpi": 100,
-                    "figure.figsize": (20, 12),
-                    "figure.titlesize": 19,
-                    "figure.titleweight": "bold",
-                    "font.family": "serif",
-                    "font.size": 12,
-                    "grid.color": "grey",
-                    "grid.linestyle": ":",
-                    "grid.linewidth": 0.5,
-                    "image.cmap": "viridis",
-                    "legend.fontsize": 10,
-                    "lines.color": "black",
-                    "lines.linewidth": 1.5,
-                    "lines.marker": "s",
-                    "lines.markersize": 5,
-                    "savefig.format": "png",
-                    "text.color": "black",
-                    "xtick.color": "black",
-                    "xtick.labelsize": 10,
-                    "ytick.color": "black",
-                    "ytick.labelsize": 10,
-                },
-            },
-        }
-        if theme in themes:
-            base_theme: str = themes[theme]["base"]["base_theme"]
-            theme_params: dict[str, Any] = themes[theme]["params"]
-            plt.style.use(base_theme)
-            plt.rcParams.update(cast(Any, theme_params))
-            self.current_style_params = theme_params
-            _logger.info("Applied theme: %s", theme)
+        if theme == "frequenz-neustrom":
+            self.current_style_params = {
+                "figure.figsize": (1000, 460),
+                "image.cmap": FREQUENZ_COLOURS,
+                "lines.color": FREQUENZ_COLOURS[0],
+            }
+        elif theme in {"elegant-minimalist", "vibrant"}:
+            self.current_style_params = {
+                "figure.figsize": (1000, 460),
+                "image.cmap": FREQUENZ_COLOURS,
+                "lines.color": FREQUENZ_COLOURS[0],
+            }
         else:
             raise ValueError(f"Style '{theme}' is not recognized.")
 
@@ -335,551 +413,372 @@ class PlotManager:
         fig_id: str,
         nrows: int = 1,
         ncols: int = 1,
-        figsize: tuple[int, int] = (10, 6),
-    ) -> tuple[Figure, list[Axes]]:
-        """Create a new figure with the specified number of rows and columns of subplots.
+        figsize: tuple[int, int] = (1000, 460),
+    ) -> tuple[go.Figure, list[PlotlyAxis]]:
+        """Create a new Plotly figure with subplots.
 
         Args:
-            fig_id: Identifier for the figure.
-            nrows: Number of rows of subplots.
-            ncols: Number of columns of subplots.
-            figsize: Size of the figure.
+            fig_id: Unique identifier for the managed figure.
+            nrows: Number of subplot rows.
+            ncols: Number of subplot columns.
+            figsize: Figure width and height in pixels.
 
         Returns:
-            The created figure and axes.
+            The created Plotly figure and its subplot wrappers.
 
         Raises:
-            ValueError:
-                - If the figure with the given ID already exists.
-                - If the number of rows or columns is less than 1.
+            ValueError: If the figure ID already exists or subplot dimensions are
+                invalid.
         """
         if fig_id in self.figures:
             raise ValueError(f"Figure with id '{fig_id}' already exists.")
         if nrows < 1 or ncols < 1:
             raise ValueError("Number of rows and columns must be at least 1.")
-        fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-        self.figures[fig_id] = fig
-        self.axes[fig_id] = [axs] if nrows * ncols == 1 else list(axs.flatten())
-        _logger.debug(
-            "Created figure '%s' with %s rows and %s columns.", fig_id, nrows, ncols
+        fig = make_subplots(rows=nrows, cols=ncols, vertical_spacing=0.12)
+        fig.update_layout(
+            width=figsize[0],
+            height=figsize[1],
+            template="plotly_white",
+            hovermode="x unified",
+            spikedistance=-1,
+            legend={"orientation": "h", "yanchor": "top", "y": -0.08},
         )
-        return fig, self.axes[fig_id]
+        axes = [
+            PlotlyAxis(fig, row=row, col=col)
+            for row in range(1, nrows + 1)
+            for col in range(1, ncols + 1)
+        ]
+        self.figures[fig_id] = fig
+        self.axes[fig_id] = axes
+        return fig, axes
 
-    def create_multiple_figures(
-        self,
-        fig_params: (
-            list[dict[str, str]]
-            | list[dict[str, int]]
-            | list[dict[str, tuple[int, int]]]
-        ),
-    ) -> None:
-        """Create multiple figures with the specified parameters.
+    def create_multiple_figures(self, fig_params: list[dict[str, Any]]) -> None:
+        """Create multiple Plotly figures.
 
         Args:
-            fig_params: List of dictionaries, each containing parameters for
-                creating a figure.
-
-        Example:
-            fig_params = [
-                {'fig_id': 'fig1', 'nrows': 1, 'ncols': 2, 'figsize': (10, 6)},
-                {'fig_id': 'fig2', 'nrows': 2, 'ncols': 2, 'figsize': (12, 8)}
-            ]
+            fig_params: List of keyword-argument dictionaries passed to
+                :meth:`create_figure`.
         """
         for params in fig_params:
-            _, _ = self.create_figure(**params)
+            self.create_figure(**params)
 
-    # pylint: disable-next=too-many-arguments
-    def create_gridspec_figure(
-        self,
-        *,
-        fig_id: str,
-        nrows: int,
-        ncols: int,
-        figsize: tuple[int, int] = (10, 6),
-        gridspec_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        """Create a new figure with a GridSpec layout.
+    def create_gridspec_figure(self, **kwargs: Any) -> None:
+        """Create a figure while accepting legacy GridSpec parameters.
 
         Args:
-            fig_id: Identifier for the figure.
-            nrows: Number of rows in the GridSpec layout.
-            ncols: Number of columns in the GridSpec layout.
-            figsize: Size of the figure.
-            gridspec_kwargs: Additional keyword arguments for GridSpec.
-
-        Raises:
-            ValueError: If the figure with the given ID already exists.
+            **kwargs: Figure creation parameters. ``gridspec_kwargs`` is
+                accepted for compatibility and ignored because Plotly subplots
+                are created without Matplotlib GridSpec.
         """
-        if fig_id in self.figures:
-            raise ValueError(f"Figure with id '{fig_id}' already exists.")
-        fig = plt.figure(figsize=figsize)
-        gs = gridspec.GridSpec(
-            nrows=nrows, ncols=ncols, **(gridspec_kwargs if gridspec_kwargs else {})
-        )
-        self.figures[fig_id] = fig
-        self.axes[fig_id] = [
-            fig.add_subplot(gs[row, col])
-            for row in range(nrows)
-            for col in range(ncols)
-        ]
-        _logger.debug(
-            "Created GridSpec figure '%s' with %s rows and %s columns.",
-            fig_id,
-            nrows,
-            ncols,
-        )
+        kwargs.pop("gridspec_kwargs", None)
+        self.create_figure(**kwargs)
 
     def create_multiple_gridspec_figures(
-        self,
-        fig_params: (
-            list[dict[str, str]]
-            | list[dict[str, int]]
-            | list[dict[str, tuple[int, int]]]
-            | list[dict[str, dict[str, Any]]]
-        ),
+        self, fig_params: list[dict[str, Any]]
     ) -> None:
-        """Create multiple GridSpec figures with the specified parameters.
+        """Create multiple GridSpec-like figures.
 
         Args:
-            fig_params: List of dictionaries, each containing parameters for
-                creating a GridSpec figure.
-
-        Example:
-            fig_params = [
-                {
-                    "fig_id": "fig1",
-                    "nrows": 2,
-                    "ncols": 2,
-                    "figsize": (10, 6),
-                    "gridspec_kwargs": {
-                        "height_ratios": [1, 2],
-                        "width_ratios": [2, 1],
-                    }
-                },
-                {"fig_id": "fig2", "nrows": 3, "ncols": 3, "figsize": (15, 10)},
-            ]
+            fig_params: List of keyword-argument dictionaries passed to
+                :meth:`create_gridspec_figure`.
         """
         for params in fig_params:
             self.create_gridspec_figure(**params)
 
     def adjust_axes_spacing(self, fig_id: str, pixels: float = 100.0) -> None:
-        """Adjust the spacing between axes to have specified pixel spacing.
+        """Adjust subplot spacing through figure margins.
 
         Args:
-            fig_id: Identifier for the figure.
-            pixels: The spacing between axes in pixels.
+            fig_id: Identifier of the managed figure to update.
+            pixels: Top and bottom margin size in pixels.
 
         Raises:
-            ValueError: If the figure ID is not found.
+            ValueError: If the figure ID is unknown.
         """
         if fig_id not in self.figures:
             raise ValueError(f"Figure '{fig_id}' does not exist.")
-
-        fig = self.figures[fig_id]
-        dpi = fig.dpi
-        fig_width, fig_height = fig.get_size_inches()
-        # Convert pixel spacing to relative units
-        hspace = pixels / fig_height / dpi
-        wspace = pixels / fig_width / dpi
-        fig.subplots_adjust(wspace=wspace, hspace=hspace)
-        fig.tight_layout(rect=(0, 0, 1, 0.98))
+        self.figures[fig_id].update_layout(margin={"t": pixels, "b": pixels})
 
     def update_legend(
         self,
         fig_id: str,
-        axs: list[Axes],
+        axs: list[PlotlyAxis],
         on: str = "axes",
         modifications: ModificationType | None = None,
         **legend_kwargs: Any,
     ) -> None:
-        """Update legend for a matplotlib figure or its axes.
+        """Update Plotly legend labels and placement.
 
         Args:
-            fig_id: Identifier for the figure.
-            axs: A matplotlib Axes object or a list of Axes from which to collect
-                handles and labels.
-            on: Specify whether to update legends on 'axes' or 'figure'.
-            modifications: A dictionary containing modifications:
-                - 'additional_items': List of tuples (handle, label) to add to
-                    legends. For on == 'axes', this should be a list of lists
-                    corresponding to each axis. For on == 'figure', this should
-                    be a list of tuples and all will be added to the figure
-                    legend.
-                - 'remove_label': A label to remove from legends.
-                - 'replace_label': A dictionary mapping old labels to new labels.
-            **legend_kwargs: Additional keyword arguments for the legend function.
+            fig_id: Identifier of the managed figure to update.
+            axs: Subplot wrappers whose traces should be included in the legend.
+            on: Whether to create one legend for the whole figure or separate
+                legends per subplot. Supported values are ``"figure"`` and
+                ``"axes"``.
+            modifications: Optional legend modifications. Supported keys are
+                ``"additional_items"``, ``"remove_label"``, and
+                ``"replace_label"``.
+            **legend_kwargs: Matplotlib-style legend placement values. The
+                current Plotly implementation uses ``loc`` for orientation and
+                approximate placement.
 
         Raises:
-            ValueError: If the figure ID is not found or if inputs are invalid.
-
-        Example:
-            modifications = {
-                'additional_items': [
-                    [(handle1, 'New Label 1')], [(handle2, 'New Label 2')]
-                ],
-                'remove_label': 'Old Label',
-                'replace_label': {'Old Label': 'New Label'},
-            }
-            plot_manager.update_legend(
-                'fig1', [ax1, ax2], on='axes',
-                modifications=modifications, loc='upper right'
-            )
+            ValueError: If the figure ID is unknown or ``on`` is invalid.
         """
         if fig_id not in self.figures:
             raise ValueError(f"Figure '{fig_id}' does not exist.")
-
+        replace_label = (modifications or {}).get("replace_label")
+        remove_label = (modifications or {}).get("remove_label")
+        additional_items = (modifications or {}).get("additional_items")
         fig = self.figures[fig_id]
+        for trace in fig.data:
+            if remove_label and trace.name == remove_label:
+                trace.showlegend = False
+            if isinstance(replace_label, dict) and trace.name in replace_label:
+                trace.name = replace_label[trace.name]
+                trace.showlegend = True
 
-        if isinstance(axs, Axes):
-            axs = [axs]
-
-        if modifications is None:
-            modifications = {}
-
-        fig.legends.clear()
         if on == "axes":
-            self._update_axes_legends(list(axs), modifications, **legend_kwargs)
-            _logger.debug("Updated legend for axes in figure '%s'.", fig_id)
-        elif on == "figure":
-            self._update_figure_legend(fig, list(axs), modifications, **legend_kwargs)
-            _logger.debug("Updated legend for figure '%s'.", fig_id)
-        else:
+            self._update_axes_legends(fig, axs, additional_items, **legend_kwargs)
+            return
+        if on != "figure":
             raise ValueError(
                 "Invalid value for 'on' parameter. Must be 'figure' or 'axes'."
             )
-        fig.tight_layout()
+
+        self._add_legend_items(fig, additional_items)
+        fig.update_layout(
+            legend={
+                "orientation": (
+                    "h" if legend_kwargs.get("loc") == "lower center" else "v"
+                ),
+                "x": 0.5 if legend_kwargs.get("loc") == "lower center" else 1.02,
+                "y": -0.08 if legend_kwargs.get("loc") == "lower center" else 0.5,
+            }
+        )
 
     def _update_axes_legends(
         self,
-        axs: list[Axes],
-        modifications: ModificationType,
+        fig: go.Figure,
+        axs: list[PlotlyAxis],
+        additional_items: AnyModificationType,
         **legend_kwargs: Any,
     ) -> None:
-        """Update legends on individual axes.
+        """Assign traces on each subplot to separate Plotly legends.
 
         Args:
-            axs: List of matplotlib Axes objects.
-            modifications: A dictionary containing modifications.
-            **legend_kwargs: Additional keyword arguments for the legend function.
-
-        Raises:
-            TypeError: If the inputs are invalid.
+            fig: Plotly figure containing the subplot traces.
+            axs: Subplot wrappers that should each receive their own legend.
+            additional_items: Optional marker-only legend entries to add.
+            **legend_kwargs: Matplotlib-style legend placement values.
         """
-        additional_items, remove_label, replace_label = self._get_modifications(
-            modifications
-        )
-        if not self._is_additional_items_type(additional_items):
-            raise TypeError("additional_items must be of type AdditionalItemsType")
-        if not self._is_text_modification_type(remove_label):
-            raise TypeError("remove_label must be of type TextModificationType")
-        if not self._is_replace_label_type(replace_label):
-            raise TypeError("replace_label must be of type ReplaceLabelType")
+        for idx, ax in enumerate(axs):
+            legend_name = "legend" if idx == 0 else f"legend{idx + 1}"
+            for trace in fig.data:
+                if self._trace_belongs_to_axis(trace, ax):
+                    trace.legend = legend_name
+                    if trace.name:
+                        trace.showlegend = True
 
-        for i, ax in enumerate(axs):
-            handles, labels = ax.get_legend_handles_labels()
-            ax.legend().set_visible(False)
+            if isinstance(additional_items, list) and idx < len(additional_items):
+                self._add_legend_items(
+                    fig,
+                    [additional_items[idx]],
+                    axis=ax,
+                    legend_name=legend_name,
+                )
 
-            axis_additional_items = (
-                additional_items[i]
-                if additional_items and i < len(additional_items)
-                else None
+            legend_layout_key = "legend" if idx == 0 else f"legend{idx + 1}"
+            fig.update_layout(
+                {
+                    legend_layout_key: {
+                        "orientation": (
+                            "h" if legend_kwargs.get("loc") == "lower center" else "v"
+                        ),
+                        "x": 1.02,
+                        "xanchor": "left",
+                        "y": self._axis_legend_y(fig, ax),
+                        "yanchor": "middle",
+                    }
+                }
             )
-            if isinstance(axis_additional_items, tuple):
-                if axis_additional_items[0] is None:
-                    axis_additional_items = None
 
-            handles, labels = self._process_handles_labels(
-                handles, labels, remove_label, replace_label, axis_additional_items
-            )
-            ax.legend(handles, labels, **legend_kwargs)
-
-    def _update_figure_legend(
-        self,
-        fig: Figure,
-        axs: list[Axes],
-        modifications: ModificationType,
-        **legend_kwargs: Any,
+    @staticmethod
+    def _add_legend_items(
+        fig: go.Figure,
+        additional_items: AnyModificationType,
+        *,
+        axis: PlotlyAxis | None = None,
+        legend_name: str = "legend",
     ) -> None:
-        """Update legend on the figure.
+        """Add marker-only legend items to a figure or subplot legend.
 
         Args:
-            fig: Matplotlib Figure object.
-            axs: List of matplotlib Axes objects.
-            modifications: A dictionary containing modifications.
-            **legend_kwargs: Additional keyword arguments for the legend function.
-
-        Raises:
-            TypeError: If the inputs are invalid.
+            fig: Plotly figure to update.
+            additional_items: Optional ``(color, label)`` pairs to add.
+            axis: Subplot to attach the legend traces to. If omitted, traces are
+                added at the figure level.
+            legend_name: Plotly legend layout key to associate with the items.
         """
-        additional_items, remove_label, replace_label = self._get_modifications(
-            modifications
+        if not isinstance(additional_items, list):
+            return
+        for item in additional_items:
+            if not item or item[0] is None:
+                continue
+            color, label = item
+            trace = go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker={"color": color},
+                name=label,
+                showlegend=True,
+                legend=legend_name,
+            )
+            if axis is None:
+                fig.add_trace(trace)
+            else:
+                fig.add_trace(trace, row=axis.row, col=axis.col)
+
+    @staticmethod
+    def _trace_belongs_to_axis(trace: Any, ax: PlotlyAxis) -> bool:
+        """Return whether a trace belongs to a subplot reference.
+
+        Args:
+            trace: Plotly trace to inspect.
+            ax: Subplot wrapper to compare against.
+
+        Returns:
+            ``True`` if the trace uses the subplot's x and y axes.
+        """
+        suffix = ax.axis_suffix()
+        xaxis = f"x{suffix}" if suffix else "x"
+        yaxis = f"y{suffix}" if suffix else "y"
+        return (
+            getattr(trace, "xaxis", None) == xaxis
+            and getattr(trace, "yaxis", None) == yaxis
         )
-        if not self._is_additional_items_type(additional_items):
-            raise TypeError("additional_items must be of type AdditionalItemsType")
-        if not self._is_text_modification_type(remove_label):
-            raise TypeError("remove_label must be of type TextModificationType")
-        if not self._is_replace_label_type(replace_label):
-            raise TypeError("replace_label must be of type ReplaceLabelType")
-
-        all_handles, all_labels = [], []
-        for ax in axs:
-            handles, labels = ax.get_legend_handles_labels()
-            ax.legend().set_visible(False)
-
-            handles, labels = self._process_handles_labels(
-                handles, labels, remove_label, replace_label, None
-            )
-            all_handles.extend(handles)
-            all_labels.extend(labels)
-
-        if additional_items:
-            extra_handles, extra_labels = zip(
-                *[
-                    (handle, label)
-                    for handle, label in additional_items
-                    if handle is not None
-                ]
-            )
-            all_handles.extend(extra_handles)
-            all_labels.extend(extra_labels)
-
-        fig.legend(all_handles, all_labels, **legend_kwargs)
 
     @staticmethod
-    def _process_handles_labels(
-        handles: list[Any],
-        labels: list[str],
-        remove_label: TextModificationType,
-        replace_label: ReplaceLabelType,
-        additional_items: tuple[Any, str] | None,
-    ) -> tuple[list[Any], list[str]]:
-        """Process handles and labels by removing, replacing, and adding items.
+    def _axis_legend_y(fig: go.Figure, ax: PlotlyAxis) -> float:
+        """Return the vertical center of a subplot domain.
 
         Args:
-            handles: List of handles.
-            labels: List of labels.
-            remove_label: Label to remove from the legend.
-            replace_label: Dictionary mapping old labels to new labels.
-            additional_items: Tuple of handle and label to add to the legend.
+            fig: Plotly figure containing the subplot.
+            ax: Subplot wrapper whose y-domain should be inspected.
 
         Returns:
-            Tuple of processed handles and labels.
-
-        Raises:
-            ValueError: If the lengths of handles and labels do not match.
+            The vertical center of the subplot in figure coordinates.
         """
-        if len(handles) != len(labels):
-            raise ValueError("Handles and labels must be of the same length.")
-
-        if remove_label:
-            handles_labels = [
-                (h, l) for h, l in zip(handles, labels) if l != remove_label
-            ]
-            _handles, _labels = zip(*handles_labels) if handles_labels else ([], [])
-            handles, labels = list(_handles), list(_labels)
-
-        if replace_label:
-            labels = [replace_label.get(old_label, old_label) for old_label in labels]
-
-        if additional_items:
-            try:
-                handles.append(additional_items[0])
-                labels.append(additional_items[1])
-            except IndexError as e:
-                _logger.warning("Failed to add additional items to legend: %s", e)
-        return list(handles), list(labels)
-
-    def _get_modifications(
-        self,
-        modifications: ModificationType,
-    ) -> tuple[AnyModificationType, AnyModificationType, AnyModificationType]:
-        """Get modifications from the input dictionary.
-
-        Args:
-            modifications: A dictionary containing modifications.
-
-        Returns:
-            tuple of additional items, remove label, and replace label.
-        """
-        additional_items = modifications.get("additional_items", None)
-        remove_label = modifications.get("remove_label", None)
-        replace_label = modifications.get("replace_label", None)
-        return additional_items, remove_label, replace_label
-
-    @staticmethod
-    def _is_additional_items_type(
-        obj: AnyModificationType,
-    ) -> TypeGuard[AdditionalItemsType]:
-        """Check if the object is of type AdditionalItemsType.
-
-        Args:
-            obj: The object to check.
-
-        Returns:
-            True if the object is of type AdditionalItemsType, False otherwise.
-        """
-        if obj is None:
-            return True
-        if isinstance(obj, list):
-            return all(
-                isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], str)
-                for item in obj
-            )
-        return False
-
-    @staticmethod
-    def _is_text_modification_type(
-        obj: AnyModificationType,
-    ) -> TypeGuard[TextModificationType]:
-        """Check if the object is of type TextModificationType.
-
-        Args:
-            obj: The object to check.
-
-        Returns:
-            True if the object is of type TextModificationType, False otherwise.
-        """
-        return obj is None or isinstance(obj, str)
-
-    @staticmethod
-    def _is_replace_label_type(obj: AnyModificationType) -> TypeGuard[ReplaceLabelType]:
-        """Check if the object is of type ReplaceLabelType.
-
-        Args:
-            obj: The object to check.
-
-        Returns:
-            True if the object is of type ReplaceLabelType, False otherwise.
-        """
-        return obj is None or (
-            isinstance(obj, dict)
-            and all(isinstance(k, str) and isinstance(v, str) for k, v in obj.items())
-        )
+        suffix = ax.axis_suffix()
+        yaxis_name = f"yaxis{suffix}"
+        yaxis = getattr(fig.layout, yaxis_name)
+        domain = yaxis.domain
+        return float((domain[0] + domain[1]) / 2)
 
     def get_style_attribute(self, attribute: str) -> Any:
         """Retrieve a specific style attribute.
 
         Args:
-            attribute: The name of the style attribute to retrieve.
+            attribute: Name of the style attribute.
 
         Returns:
-            The value of the requested style attribute, or None if it does not
-            exist.
+            The style value, or ``None`` if the attribute is not configured.
         """
-        return self.current_style_params.get(attribute, None)
+        return self.current_style_params.get(attribute)
 
-    def get_all_style_attributes(self) -> dict[str, str | int | float]:
+    def get_all_style_attributes(self) -> dict[str, Any]:
         """Retrieve all current style attributes.
 
         Returns:
-            A dictionary of all current style attributes.
+            The active style parameter mapping.
         """
         return self.current_style_params
 
-    def get_axes(self, fig_id: str, ax_idx: int | None = None) -> list[Axes]:
-        """Retrieve the axes for a given figure and axis index.
+    def get_axes(self, fig_id: str, ax_idx: int | None = None) -> list[PlotlyAxis]:
+        """Retrieve subplot references for a figure.
 
         Args:
-            fig_id: Identifier for the figure.
-            ax_idx: Index of the axis to retrieve. If None, return all axes.
+            fig_id: Identifier of the managed figure.
+            ax_idx: Optional zero-based subplot index. If omitted, all subplots
+                are returned.
 
         Returns:
-            The requested axis or axes as a list.
+            A list containing the requested subplot wrappers.
 
         Raises:
-            ValueError: If the figure does not exist.
-            IndexError: If the axis index is out of bounds.
-            TypeError: If the axes are not stored in a list.
+            ValueError: If the figure ID is unknown.
+            IndexError: If ``ax_idx`` is outside the figure's subplot list.
         """
-        if fig_id in self.axes:
-            axes = self.axes[fig_id]
-            if ax_idx is None:
-                return axes
-            if isinstance(axes, list):
-                if ax_idx < len(axes):
-                    return [axes[ax_idx]]
-                raise IndexError(
-                    f"Axis index '{ax_idx}' is out of bounds for figure '{fig_id}'."
-                )
-            raise TypeError(f"Axes for figure '{fig_id}' are not stored in a list.")
-        raise ValueError(f"Figure '{fig_id}' does not exist.")
+        if fig_id not in self.axes:
+            raise ValueError(f"Figure '{fig_id}' does not exist.")
+        axes = self.axes[fig_id]
+        if ax_idx is None:
+            return axes
+        if ax_idx >= len(axes):
+            raise IndexError(
+                f"Axis index '{ax_idx}' is out of bounds for figure '{fig_id}'."
+            )
+        return [axes[ax_idx]]
 
-    def get_figure(self, fig_id: str) -> Figure:
-        """Retrieve the figure handle for a given figure ID.
+    def get_figure(self, fig_id: str) -> go.Figure:
+        """Retrieve a managed Plotly figure.
 
         Args:
-            fig_id: Identifier for the figure.
+            fig_id: Identifier of the managed figure.
 
         Returns:
-            The requested figure.
+            The requested Plotly figure.
 
         Raises:
-            ValueError: If the figure does not exist.
+            ValueError: If the figure ID is unknown.
         """
         if fig_id in self.figures:
             return self.figures[fig_id]
         raise ValueError(f"Figure '{fig_id}' does not exist.")
 
     def show_all(self) -> None:
-        """Display all the figures managed by PlotManager.
+        """Display all managed figures that contain data.
 
         Raises:
-            RuntimeError: If there are no figures to display.
+            RuntimeError: If there are no managed figures to display.
         """
         if not self.figures:
             raise RuntimeError("No figures to display.")
-
         for fig in self.figures.values():
-            fig.tight_layout()
-            fig.show()
-        _logger.info("Displayed all figures.")
+            if fig.data:
+                _display_figure(fig)
 
     def save_all(self, directory: str) -> None:
-        """Save all the figures managed by PlotManager to the specified directory.
+        """Save all managed figures as standalone HTML files.
 
         Args:
-            directory: Directory to save the figures.
+            directory: Destination directory for generated ``.html`` files.
 
         Raises:
-            ValueError: If the directory is not specified.
+            ValueError: If ``directory`` is empty.
         """
         if not directory:
             raise ValueError("Directory not specified.")
-
-        if not self.figures:
-            _logger.info("No figures to save.")
-
         os.makedirs(directory, exist_ok=True)
         for fig_id, fig in self.figures.items():
-            fig.savefig(f"{directory}/{fig_id}.png")
-        _logger.info("Saved all figures to directory %s", directory)
+            fig.write_html(f"{directory}/{fig_id}.html", include_plotlyjs="cdn")
 
     @contextmanager
     def manage_figure(
         self, fig_id: str, save: bool = False, directory: str | None = None
     ) -> Generator[None, None, None]:
-        """Context manager to handle showing and optionally saving figures automatically.
+        """Show a managed figure after a plotting block and optionally save it.
 
         Args:
-            fig_id: Identifier for the figure.
-            save: Whether to save the figures after showing them.
-            directory: Directory to save the figures if save is True.
+            fig_id: Identifier of the managed figure to show after the context.
+            save: Whether to save all managed figures after showing ``fig_id``.
+            directory: Destination directory used when ``save`` is ``True``.
 
         Yields:
-            None: The context within which the figure is managed.
-
-        Raises:
-            ValueError: If save is True and directory is not specified.
+            Control to the caller's plotting block.
         """
-        try:
-            yield
-        finally:
-            self.show_all()
-            if save:
-                if directory:
-                    self.save_all(directory)
-                else:
-                    raise ValueError("Directory must be specified if save is True.")
-            _logger.debug(
-                "Managed figure '%s' with automatic display and optional save.", fig_id
-            )
+        yield
+        self.get_figure(fig_id).show()
+        if save and directory:
+            self.save_all(directory)

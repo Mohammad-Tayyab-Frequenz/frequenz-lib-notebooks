@@ -31,14 +31,15 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, cast
 from warnings import warn
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.artist import Artist
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
+import plotly.graph_objects as go
 
-from frequenz.lib.notebooks.solar.maintenance.plot_styles import PlotStyleStrategy
+from frequenz.lib.notebooks.solar.maintenance.plot_manager import PlotlyAxis
+from frequenz.lib.notebooks.solar.maintenance.plot_styles import (
+    PlotlyColourScale,
+    PlotStyleStrategy,
+)
 from frequenz.lib.notebooks.solar.maintenance.plotter_config import (
     CalendarViewConfig,
     DailyViewConfig,
@@ -60,19 +61,22 @@ class BasePlotter(ABC):
             config: The plotting configuration.
         """
         self.config = config
-        self.fig_size = plt.rcParams["figure.figsize"]
+        self.fig_size = (1400, 900)
         self._production_artist_zorder = 2.02  # zorder for production artists
 
     @abstractmethod
     def plot(
-        self, data: pd.DataFrame, fig: Figure | None = None, ax: Axes | None = None
+        self,
+        data: pd.DataFrame,
+        fig: go.Figure | None = None,
+        ax: PlotlyAxis | None = None,
     ) -> None:
         """Plot the data.
 
         Args:
             data: Data to be plotted, prepared by the corresponding preparer.
-            fig: The matplotlib figure for the plot.
-            ax: The matplotlib axis for the plot.
+            fig: The Plotly figure for the plot.
+            ax: The Plotly subplot reference for the plot.
 
         Raises:
             NotImplementedError: If the method is not implemented by the subclass.
@@ -95,14 +99,14 @@ class BasePlotter(ABC):
         return False
 
     def _initialise_figure(
-        self, fig: Figure | None = None, ax: Axes | None = None
-    ) -> tuple[Figure, Axes]:
+        self, fig: go.Figure | None = None, ax: PlotlyAxis | None = None
+    ) -> tuple[go.Figure, PlotlyAxis]:
         """Initialise the plot figure and axis.
 
         Args:
-            fig: The matplotlib figure to plot the data on. If not provided, a new plot
+            fig: The Plotly figure to plot the data on. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
-            ax: The matplotlib axis to plot the data. If not provided, a new plot
+            ax: The Plotly subplot reference to plot the data. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
 
         Returns:
@@ -112,17 +116,18 @@ class BasePlotter(ABC):
             ValueError: If either fig or ax are provided without
         """
         if fig is None and ax is None:
-            fig, ax = plt.subplots(figsize=self.fig_size)
+            fig = go.Figure()
+            ax = PlotlyAxis(fig)
         elif fig is None or ax is None:
             raise ValueError("Either define both figure and axes or neither.")
         return fig, ax
 
     @staticmethod
-    def _hide_axes(ax: Axes | None) -> None:
+    def _hide_axes(ax: PlotlyAxis | None) -> None:
         """Hide the axes in the plot.
 
         Args:
-            ax: The matplotlib axis to hide.
+            ax: The Plotly subplot reference to hide.
         """
         if ax is not None:
             ax.set_visible(False)
@@ -228,13 +233,54 @@ class BasePlotter(ABC):
         return formatted_labels
 
     @staticmethod
-    def _set_axes_properties(ax: Axes, properties: dict[str, Any]) -> None:
+    def _tick_values_from_indices(values: list[Any], indices: list[int]) -> list[Any]:
+        """Return full x-axis values for selected tick indices.
+
+        Args:
+            values: Full x-axis values used by the Plotly traces.
+            indices: Selected tick indices returned by the tick generator.
+
+        Returns:
+            Hover-friendly x-axis values for the selected tick positions.
+        """
+        return [BasePlotter._format_hover_x_value(values[idx]) for idx in indices]
+
+    @staticmethod
+    def _format_hover_x_value(value: Any) -> Any:
+        """Return a hover-friendly x value while preserving non-string values.
+
+        Args:
+            value: A single x-axis value. Multi-line strings are collapsed into
+                a single line so Plotly unified hover titles show full dates.
+
+        Returns:
+            The original non-string value, or a single-line string.
+        """
+        if not isinstance(value, str):
+            return value
+        return " ".join(part for part in value.splitlines() if part)
+
+    @staticmethod
+    def _format_hover_x_values(values: list[Any]) -> list[Any]:
+        """Return hover-friendly x values.
+
+        Args:
+            values: X-axis values to normalize for Plotly traces.
+
+        Returns:
+            X-axis values with multi-line strings converted to single-line
+            labels.
+        """
+        return [BasePlotter._format_hover_x_value(value) for value in values]
+
+    @staticmethod
+    def _set_axes_properties(ax: PlotlyAxis, properties: dict[str, Any]) -> None:
         """Set common axes properties such as title, labels, and limits.
 
         Args:
-            ax: The matplotlib axis to apply the styles to.
+            ax: The Plotly subplot reference to apply the styles to.
             properties: A dictionary containing keys for title, x_label, y_label,
-                and other styling options supported by the matplotlib Axes.
+                and other supported styling options.
         """
         property_mapping: dict[str, Callable[[Any], Any] | None] = {
             "title": ax.set_title,
@@ -256,8 +302,8 @@ class BasePlotter(ABC):
 
     @staticmethod
     def _add_figure_legend(
-        fig: Figure,
-        axs: list[Axes],
+        fig: go.Figure,
+        axs: list[PlotlyAxis],
         loc: str = "upper right",
         ncol: int = 1,
         bbox_to_anchor: tuple[float, float] | None = None,
@@ -269,36 +315,27 @@ class BasePlotter(ABC):
         positioning of the legend using `bbox_to_anchor` and `loc`.
 
         Args:
-            fig: The matplotlib figure to which the legend should be added.
-            axs: A list of matplotlib axes or a single axis to extract handles/labels from.
+            fig: The Plotly figure to which the legend should be added.
+            axs: A list of Plotly subplot references to extract labels from.
             loc: The location of the legend on the figure.
             ncol: The number of columns for the legend.
             bbox_to_anchor: The position of the legend on the figure. (0, 0) is the
                 lower-left corner, and (1, 1) is the upper-right corner of the figure.
                 This is useful for placing the legend outside the axes or figure.
         """
-        handles: list[Artist] = []
         labels: list[str] = []
         seen = set()
         for ax in axs:
             if ax.get_visible():
-                for handle, label in zip(*ax.get_legend_handles_labels()):
+                for label in ax.get_legend_handles_labels()[1]:
                     if label not in seen:
                         seen.add(label)
-                        handles.append(handle)
                         labels.append(label)
-        if handles and labels:
-            fig.legend(
-                handles=handles,
-                labels=labels,
-                bbox_to_anchor=bbox_to_anchor,
-                loc=cast(Any, loc),
-                ncol=ncol,
-            )
-            fig.tight_layout()
+        if labels:
+            del bbox_to_anchor, loc, ncol
+            fig.update_layout(showlegend=True)
         else:
-            # NOTE: log message: There is no data to plot, closing the figure.
-            plt.close(fig)
+            fig.update_layout(showlegend=False)
 
 
 class CalendarPlotter(BasePlotter):
@@ -313,15 +350,18 @@ class CalendarPlotter(BasePlotter):
         super().__init__(config)
 
     def plot(
-        self, data: pd.DataFrame, fig: Figure | None = None, ax: Axes | None = None
+        self,
+        data: pd.DataFrame,
+        fig: go.Figure | None = None,
+        ax: PlotlyAxis | None = None,
     ) -> None:
         """Plot the calendar view.
 
         Args:
             data: Prepared data for the calendar view plot.
-            fig: The matplotlib figure to plot the data on. Note that both fig
+            fig: The Plotly figure to plot the data on. Note that both fig
                 and ax must be provided together.
-            ax: The matplotlib axis to plot the data. If not provided, a new plot
+            ax: The Plotly subplot reference to plot the data. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
         """
         if self._is_data_empty(data, "(CalendarPlotter)"):
@@ -330,12 +370,12 @@ class CalendarPlotter(BasePlotter):
         fig, ax = self._initialise_figure(fig=fig, ax=ax)
         self._plot(data, ax)
 
-    def _plot(self, data: pd.DataFrame, ax: Axes) -> None:
+    def _plot(self, data: pd.DataFrame, ax: PlotlyAxis) -> None:
         """Plot the calendar data.
 
         Args:
             data: Data for the calendar plot.
-            ax: The matplotlib axis for the plot.
+            ax: The Plotly subplot reference for the plot.
 
         Raises:
             ValueError: If an invalid time frame is provided.
@@ -383,15 +423,26 @@ class CalendarPlotter(BasePlotter):
             timezone=str(_data_index.tzinfo),
             current=current,
         )
-        data.plot(
-            ax=ax,
-            kind="line" if self.config.time_frame.lower() == "day" else "bar",
-            style=plot_styles["plot_style"],
-            y=plot_styles["plot_var"],
-            rot=0,
-            zorder=self._production_artist_zorder,
-            legend=False,
-        )
+        plot_var = plot_styles["plot_var"]
+        if self.config.time_frame.lower() == "day":
+            ax.add_trace(
+                go.Scatter(
+                    x=data.index,
+                    y=data[plot_var],
+                    mode="lines+markers",
+                    name=str(plot_var),
+                    showlegend=False,
+                )
+            )
+        else:
+            ax.add_trace(
+                go.Bar(
+                    x=data.index,
+                    y=data[plot_var],
+                    name=str(plot_var),
+                    showlegend=False,
+                )
+            )
         self._set_axes_properties(
             ax=ax,
             properties={
@@ -423,15 +474,18 @@ class RollingPlotter(BasePlotter):
         super().__init__(config)
 
     def plot(
-        self, data: pd.DataFrame, fig: Figure | None = None, ax: Axes | None = None
+        self,
+        data: pd.DataFrame,
+        fig: go.Figure | None = None,
+        ax: PlotlyAxis | None = None,
     ) -> None:
         """Plot the rolling view.
 
         Args:
             data: Prepared data for the rolling view plot.
-            fig: The matplotlib figure to plot the data on. Note that both fig
+            fig: The Plotly figure to plot the data on. Note that both fig
                 and ax must be provided together.
-            ax: The matplotlib axis to plot the data. If not provided, a new plot
+            ax: The Plotly subplot reference to plot the data. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
         """
         if self._is_data_empty(data, "(RollingPlotter)"):
@@ -441,16 +495,18 @@ class RollingPlotter(BasePlotter):
         self._plot(data, fig, ax)
 
     # pylint: disable=too-many-locals
-    def _plot(self, data: pd.DataFrame, fig: Figure, ax: Axes) -> None:
+    def _plot(self, data: pd.DataFrame, fig: go.Figure, ax: PlotlyAxis) -> None:
         """Plot the rolling data.
 
         Args:
             data: Data for the rolling plot.
-            fig: The matplotlib figure for the plot.
-            ax: The matplotlib axis for the plot.
+            fig: The Plotly figure for the plot.
+            ax: The Plotly subplot reference for the plot.
         """
         data_index = pd.to_datetime(data.index)
-        cmap = plt.get_cmap(self.config.cmap_name)
+        cmap = PlotlyColourScale(
+            self.config.cmap_name if isinstance(self.config.cmap_name, list) else None
+        )
         plot_styles = _get_plot_styles(
             plot_type="rolling",
             time_frame=self.config.view[1],
@@ -463,56 +519,45 @@ class RollingPlotter(BasePlotter):
         )
 
         if self.config.rolling_average:
-            ngroups = 1 + (
-                data.shape[0] // plot_styles["group_size_rolling_average_plot"]
+            oldest_index = max(
+                -plot_styles["group_size_rolling_average_plot"],
+                -data.shape[0],
             )
-            cmap_values = np.linspace(0, 0.9, ngroups)
-            for i in range(0, ngroups, 1):
-                oldest_index = max(
-                    -plot_styles["group_size_rolling_average_plot"] * (i + 1),
-                    -data.shape[0],
-                )
-                newest_index = (
-                    -plot_styles["group_size_rolling_average_plot"] * i
-                    if i > 0
-                    else None
-                )
-                if i == 0:
-                    label = self.config.translation_manager.translate(
-                        "current {value}-" + f"{self.config.view[1][:-1]} cycle",
-                        value=plot_styles["group_size_rolling_average_plot"],
-                    )
-                elif i == 1:
-                    label = self.config.translation_manager.translate("1 cycle ago")
-                else:
-                    label = self.config.translation_manager.translate(
-                        "{value} cycles ago", value=i
-                    )
-                ax.plot(
-                    data[self.config.x_axis_label].values[oldest_index:newest_index],
-                    data[
-                        [col for col in data.columns if col != self.config.x_axis_label]
-                    ].values[oldest_index:newest_index],
-                    label=label,
-                    color=cmap(cmap_values[i]),
-                    alpha=plot_styles["alpha"],
-                )
-            xticklabels, xticks = self._generate_xticks(
-                arr=list(
-                    data.iloc[-plot_styles["group_size_rolling_average_plot"] :][
-                        self.config.x_axis_label
-                    ]
+            cols_to_plot = [
+                col for col in data.columns if col != self.config.x_axis_label
+            ]
+            data_to_plot = data.iloc[oldest_index:].dropna(
+                how="all", subset=cols_to_plot
+            )
+            label = self.config.translation_manager.translate(
+                "current {value}-" + f"{self.config.view[1][:-1]} cycle",
+                value=plot_styles["group_size_rolling_average_plot"],
+            )
+            ax.plot(
+                self._format_hover_x_values(
+                    list(data_to_plot[self.config.x_axis_label].values)
                 ),
+                data_to_plot[cols_to_plot].values,
+                "o-",
+                label=label,
+                color=cmap(0),
+                alpha=cast(float, plot_styles["alpha"]),
+            )
+            x_axis_values = list(data_to_plot[self.config.x_axis_label])
+            xticklabels, xticks = self._generate_xticks(
+                arr=x_axis_values,
                 max_xticks=plot_styles["max_xticks"],
                 sep=self.config.string_separator,
             )
+            xticks = self._tick_values_from_indices(x_axis_values, xticks)
             self._add_figure_legend(
                 fig, [ax], loc="center left", ncol=1, bbox_to_anchor=(1.0, 0.5)
             )
 
         else:
+            x_axis_values = list(data[self.config.x_axis_label].values)
             xticklabels, xticks = self._generate_xticks(
-                arr=list(data[self.config.x_axis_label].values),
+                arr=x_axis_values,
                 max_xticks=plot_styles["max_xticks"],
                 sep=(
                     self.config.string_separator
@@ -520,25 +565,37 @@ class RollingPlotter(BasePlotter):
                     else None
                 ),
             )
+            xticks = self._tick_values_from_indices(x_axis_values, xticks)
             cols_to_plot = [
                 col for col in data.columns if col != self.config.x_axis_label
             ]
             cmap_values = np.linspace(0, 0.9, len(cols_to_plot))
-            data.plot(
-                ax=ax,
-                kind=plot_styles["plot_kind"],
-                style=str(plot_styles["plot_style"]),
-                x=self.config.x_axis_label,
-                y=cols_to_plot,
-                label=self.config.translation_manager.translate_list(cols_to_plot),
-                color=(
-                    plot_styles["color"]
-                    if len(cols_to_plot) == 1
-                    else [cmap(cmap_values[i]) for i, _ in enumerate(cols_to_plot)]
-                ),
-                rot=0,
-                zorder=self._production_artist_zorder,
+            labels = self.config.translation_manager.translate_list(cols_to_plot)
+            colors = (
+                [plot_styles["color"]]
+                if len(cols_to_plot) == 1
+                else [cmap(cmap_values[i]) for i, _ in enumerate(cols_to_plot)]
             )
+            for col, label, color in zip(cols_to_plot, labels, colors):
+                ax.add_trace(
+                    go.Scatter(
+                        x=self._format_hover_x_values(
+                            list(data[self.config.x_axis_label])
+                        ),
+                        y=data[col],
+                        mode="lines+markers",
+                        name=label,
+                        line={
+                            "color": color,
+                            "dash": (
+                                "dot"
+                                if "--" in str(plot_styles["plot_style"])
+                                else "solid"
+                            ),
+                            "width": 1.3,
+                        },
+                    )
+                )
         self._set_axes_properties(
             ax=ax,
             properties={
@@ -570,17 +627,17 @@ class ProfilePlotter(BasePlotter):
     def plot(
         self,
         data: pd.DataFrame,
-        fig: Figure | None = None,
-        ax: Axes | None = None,
+        fig: go.Figure | None = None,
+        ax: PlotlyAxis | None = None,
         group_label: str = "",
     ) -> None:
         """Plot the statistical profile.
 
         Args:
             data: Prepared data for the statistical profile plot.
-            fig: The matplotlib figure to plot the data on. Note that both fig
+            fig: The Plotly figure to plot the data on. Note that both fig
                 and ax must be provided together.
-            ax: The matplotlib axis to plot the data. If not provided, a new plot
+            ax: The Plotly subplot reference to plot the data. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
             group_label: The grouping label used for the statistical analysis
                 that generated the data to be plotted.
@@ -593,7 +650,7 @@ class ProfilePlotter(BasePlotter):
 
     # pylint: disable-next=too-many-locals
     def _plot(
-        self, data: pd.DataFrame, group_label: str, fig: Figure, ax: Axes
+        self, data: pd.DataFrame, group_label: str, fig: go.Figure, ax: PlotlyAxis
     ) -> None:
         """Plot the statistical profile.
 
@@ -601,8 +658,8 @@ class ProfilePlotter(BasePlotter):
             data: Data for the statistical profile plot.
             group_label: The grouping label used for the statistical analysis
                 that generated the data to be plotted.
-            fig: The matplotlib figure for the plot.
-            ax: The matplotlib axis for the plot.
+            fig: The Plotly figure for the plot.
+            ax: The Plotly subplot reference for the plot.
         """
         cols_to_plot = [col for col in data.columns if self.config.column_label in col]
         labels = [col.split("_")[-1] for col in cols_to_plot]
@@ -611,7 +668,11 @@ class ProfilePlotter(BasePlotter):
             time_frame=group_label,
             translation_manager=self.config.translation_manager,
             col_label=self.config.column_label,
-            cmap=plt.get_cmap(self.config.cmap_name),
+            cmap=PlotlyColourScale(
+                self.config.cmap_name
+                if isinstance(self.config.cmap_name, list)
+                else None
+            ),
             interpolate_colormap=self.config.interpolate_colormap,
             data_index=data.index,
         )
@@ -621,35 +682,34 @@ class ProfilePlotter(BasePlotter):
             end = data.index[0] + pd.Timedelta(hours=1)
             for _label, _col in zip(labels, cols_to_plot):
                 _label = self.config.translation_manager.translate(_label)
-                data.reset_index().plot(
-                    ax=ax,
-                    kind="scatter",
-                    x=data.index.name,
-                    y=_col,
-                    marker=plot_styles["statistics_plot_styles"][_label]["marker"],
-                    label=_label,
-                    color=plot_styles["statistics_plot_styles"][_label]["color"],
-                    xlim=(start, end),
-                    zorder=self._production_artist_zorder,
+                ax.add_trace(
+                    go.Scatter(
+                        x=data.index,
+                        y=data[_col],
+                        mode="markers",
+                        marker={
+                            "symbol": plot_styles["statistics_plot_styles"][_label][
+                                "marker"
+                            ],
+                            "color": plot_styles["statistics_plot_styles"][_label][
+                                "color"
+                            ],
+                        },
+                        name=_label,
+                        showlegend=True,
+                    )
                 )
+                ax.set_xlim((start, end))
             xticks = None
             xticklabels = None
         else:
             for _label, _col in zip(labels, cols_to_plot):
                 _label = self.config.translation_manager.translate(_label)
                 line_style = plot_styles["statistics_plot_styles"][_label]
-                x_values = data[self.config.x_axis_label].to_numpy()
-                if line_style["kind"] == "line":
-                    y_values = data[_col].to_numpy(dtype=float)
-                    ax.plot(
-                        x_values,
-                        y_values,
-                        color=line_style["color"],
-                        alpha=line_style["alpha"],
-                        label=_label,
-                        zorder=self._production_artist_zorder,
-                    )
-                elif line_style["kind"] == "area":
+                x_values = self._format_hover_x_values(
+                    list(data[self.config.x_axis_label])
+                )
+                if line_style["kind"] == "area":
                     y_lower = data[_col].to_numpy(dtype=float)
                     curve_2_label = (
                         f"{self.config.column_label}_" f"{line_style['curve_2']}"
@@ -661,10 +721,27 @@ class ProfilePlotter(BasePlotter):
                         y_upper,
                         color=line_style["color"],
                         alpha=line_style["alpha"],
-                        label=line_style["area_label"],
+                        label=str(line_style["area_label"]),
                     )
-                else:
+
+            for _label, _col in zip(labels, cols_to_plot):
+                _label = self.config.translation_manager.translate(_label)
+                line_style = plot_styles["statistics_plot_styles"][_label]
+                if line_style["kind"] != "line":
                     continue
+                ax.add_trace(
+                    go.Scatter(
+                        x=self._format_hover_x_values(
+                            list(data[self.config.x_axis_label])
+                        ),
+                        y=data[_col].to_numpy(dtype=float),
+                        mode="lines+markers",
+                        line={"color": line_style["color"], "width": 1.6},
+                        marker={"size": 7},
+                        opacity=line_style["alpha"],
+                        name=_label,
+                    )
+                )
 
             # special case for "continuous" plot: ensure xticks are at the beginning of each day
             indices_mask: list[int] | None = None
@@ -673,8 +750,9 @@ class ProfilePlotter(BasePlotter):
                 indices_mask = np.where(~df_index.normalize().duplicated(keep="first"))[
                     0
                 ].tolist()
+            x_axis_values = list(data[self.config.x_axis_label].values)
             xticklabels, xticks = self._generate_xticks(
-                arr=list(data[self.config.x_axis_label].values),
+                arr=x_axis_values,
                 max_xticks=int(plot_styles["axes_params"]["max_xticks"]),
                 sep=(
                     None
@@ -683,6 +761,7 @@ class ProfilePlotter(BasePlotter):
                 ),
                 indices=indices_mask,
             )
+            xticks = self._tick_values_from_indices(x_axis_values, xticks)
         self._set_axes_properties(
             ax=ax,
             properties={
@@ -721,15 +800,18 @@ class DailyPlotter(BasePlotter):
         super().__init__(config)
 
     def plot(
-        self, data: pd.DataFrame, fig: Figure | None = None, ax: Axes | None = None
+        self,
+        data: pd.DataFrame,
+        fig: go.Figure | None = None,
+        ax: PlotlyAxis | None = None,
     ) -> None:
         """Plot the daily view.
 
         Args:
             data: Prepared data for the daily view plot.
-            fig: The matplotlib figure to plot the data on. Note that both fig
+            fig: The Plotly figure to plot the data on. Note that both fig
                 and ax must be provided together.
-            ax: The matplotlib axis to plot the data. If not provided, a new plot
+            ax: The Plotly subplot reference to plot the data. If not provided, a new plot
                 is created. Note that both fig and ax must be provided together.
         """
         if self._is_data_empty(data, "(daily view)"):
@@ -738,40 +820,45 @@ class DailyPlotter(BasePlotter):
         fig, ax = self._initialise_figure(fig=fig, ax=ax)
         self._plot(data, ax)
 
-    def _plot(self, data: pd.DataFrame, ax: Axes) -> None:
+    def _plot(self, data: pd.DataFrame, ax: PlotlyAxis) -> None:
         """Plot the daily view.
 
         Args:
             data: Prepared data for the daily view plot.
-            ax: The matplotlib axis for the plot.
+            ax: The Plotly subplot reference for the plot.
         """
         if len(data) == 1:
             start = data.index[0] - pd.Timedelta(days=1)
             end = data.index[0] + pd.Timedelta(days=1)
-            data.reset_index().plot(
-                ax=ax,
-                kind="scatter",
-                marker="o",
-                x=data[self.config.column_label].name,
-                y=self.config.column_label,
-                xlim=(start, end),
-                color=self.config.colour,
-                label=self.config.column_label,
+            ax.add_trace(
+                go.Scatter(
+                    x=data.index,
+                    y=data[self.config.column_label],
+                    mode="markers",
+                    marker={"color": self.config.colour},
+                    name=self.config.translation_manager.translate("production"),
+                )
             )
+            ax.set_xlim((start, end))
             xticks, xticklabels = None, None
         else:
-            data.plot(
-                ax=ax,
-                x=self.config.x_axis_label,
-                y=self.config.column_label,
-                label=self.config.column_label,
-                color=self.config.colour,
+            ax.add_trace(
+                go.Scatter(
+                    x=self._format_hover_x_values(list(data[self.config.x_axis_label])),
+                    y=data[self.config.column_label],
+                    mode="lines+markers",
+                    marker={"color": self.config.colour},
+                    line={"color": self.config.colour, "dash": "solid", "width": 1.3},
+                    name=self.config.translation_manager.translate("production"),
+                )
             )
+            x_axis_values = list(data[self.config.x_axis_label].values)
             xticklabels, xticks = self._generate_xticks(
-                arr=list(data[self.config.x_axis_label].values),
+                arr=x_axis_values,
                 max_xticks=15,
                 sep=self.config.string_separator,
             )
+            xticks = self._tick_values_from_indices(x_axis_values, xticks)
 
         self._set_axes_properties(
             ax=ax,

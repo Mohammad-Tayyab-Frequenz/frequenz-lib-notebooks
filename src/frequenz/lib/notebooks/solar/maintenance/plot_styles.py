@@ -16,13 +16,44 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Any
 
-import matplotlib.pyplot as plt
 import pandas as pd
 from IPython.display import HTML, display
 
+from frequenz.lib.notebooks.solar.maintenance.plot_manager import FREQUENZ_COLOURS
 from frequenz.lib.notebooks.solar.maintenance.translator import TranslationManager
 
 _logger = logging.getLogger(__name__)
+
+
+class PlotlyColourScale:
+    """Callable colour scale compatible with old colormap-style calls."""
+
+    def __init__(self, colours: list[str] | None = None) -> None:
+        """Initialize the colour scale.
+
+        Args:
+            colours: Ordered list of colour values. If omitted, the Frequenz
+                brand colour palette is used.
+        """
+        self.colours = colours or FREQUENZ_COLOURS
+        self.n_colours = len(self.colours)
+
+    def __call__(self, value: float | int) -> str:
+        """Return a colour for an integer index or normalized float.
+
+        Args:
+            value: Either an integer palette index or a normalized float in the
+                range ``0`` to ``1``.
+
+        Returns:
+            The selected colour string. Values outside the palette length wrap
+            around with modulo indexing.
+        """
+        if isinstance(value, float) and 0 <= value <= 1:
+            idx = round(value * (self.n_colours - 1))
+        else:
+            idx = int(value)
+        return self.colours[idx % self.n_colours]
 
 
 class PlotStyleStrategy(ABC):
@@ -150,9 +181,7 @@ class StatisticalPlotStyle(PlotStyleStrategy):
 
         data_index = kwargs.pop("data_index")
         col_label = kwargs.pop("col_label", "")
-        cmap = kwargs.pop(
-            "cmap", plt.get_cmap(plt.rcParams.get("image.cmap", "viridis"))
-        )
+        cmap = kwargs.pop("cmap", PlotlyColourScale())
         interpolate_colormap = kwargs.pop("interpolate_colormap", False)
 
         y_label = " (".join(col_label.split("_")) + ")" if col_label else ""
@@ -202,35 +231,35 @@ class StatisticalPlotStyle(PlotStyleStrategy):
             str, dict[str, str | float | tuple[float, ...] | None]
         ] = {
             translation_manager.translate("mean"): {
-                "marker": "o",
+                "marker": "circle",
                 "color": cmap(0.8) if interpolate_colormap else cmap(2),
                 "kind": "line",
                 "alpha": 0.8,
             },
             translation_manager.translate("median"): {
-                "marker": "s",
+                "marker": "square",
                 "color": cmap(0.4) if interpolate_colormap else cmap(5),
                 "kind": "line",
                 "alpha": 0.8,
             },
             "min": {
-                "marker": "v",
+                "marker": "triangle-down",
                 "color": cmap(0.2) if interpolate_colormap else cmap(11),
                 "kind": "area",
                 "curve_2": "max",
                 "alpha": 0.4,
                 "area_label": "Min-Max",
             },
-            "max": {"marker": "^", "color": cmap(0.9), "kind": None},
+            "max": {"marker": "triangle-up", "color": cmap(0.9), "kind": None},
             "25th percentile": {
-                "marker": "P",
+                "marker": "cross",
                 "color": cmap(0.5) if interpolate_colormap else cmap(4),
                 "kind": "area",
                 "curve_2": "75th percentile",
                 "alpha": 0.4,
                 "area_label": "Q1-Q3",
             },
-            "75th percentile": {"marker": "D", "color": cmap(0.7), "kind": None},
+            "75th percentile": {"marker": "diamond", "color": cmap(0.7), "kind": None},
         }
         return {
             "axes_params": axes_params[time_frame],
@@ -277,7 +306,7 @@ class RollingPlotStyle(PlotStyleStrategy):
         current = kwargs.pop("current")
         time = kwargs.pop("time")
         rolling_average = kwargs.pop("rolling_average")
-        colour = kwargs.pop("colour", plt.rcParams["lines.color"])
+        colour = kwargs.pop("colour", FREQUENZ_COLOURS[0])
 
         plot_styles: dict[str, dict[str, str | float]] = {
             "hours": {
@@ -299,7 +328,7 @@ class RollingPlotStyle(PlotStyleStrategy):
                 ),
                 "color": colour,
                 "max_xticks": 10,
-                "group_size_rolling_average_plot": 24 * 365,
+                "group_size_rolling_average_plot": time,
             },
             "days": {
                 "plot_style": "--o",
@@ -317,7 +346,7 @@ class RollingPlotStyle(PlotStyleStrategy):
                 "color": colour,
                 "alpha": 0.7,
                 "max_xticks": 15,
-                "group_size_rolling_average_plot": 365,
+                "group_size_rolling_average_plot": time,
             },
         }
         return plot_styles[time_frame]
