@@ -16,6 +16,7 @@ from frequenz.client.assets import AssetsApiClient
 from frequenz.gridpool import load_configs
 
 from frequenz.data.microgrid import MicrogridData
+from frequenz.lib.notebooks._credentials import resolve_credentials
 from frequenz.lib.notebooks.dayahead import fetch_day_ahead_prices
 
 _logger = logging.getLogger(__name__)
@@ -52,31 +53,6 @@ def _load_dotenv_files(dotenv_path: str | Sequence[str]) -> None:
             _logger.warning("No environment variables loaded from %s.", expanded)
 
 
-_CREDENTIAL_ENV_PAIRS = (
-    ("API_AUTH_KEY", "API_SIGN_SECRET"),
-    ("API_KEY", "API_SECRET"),
-)
-
-
-def _credentials() -> tuple[str, str]:
-    """Return the first credential pair whose key and secret are both set.
-
-    Both halves must come from the same pair, otherwise a key from one dotenv file
-    could end up signed with a secret from another.
-    """
-    for key_var, secret_var in _CREDENTIAL_ENV_PAIRS:
-        key = os.getenv(key_var, "")
-        secret = os.getenv(secret_var, "")
-        if key and secret:
-            return key, secret
-
-    names = " or ".join(f"{k}/{s}" for k, s in _CREDENTIAL_ENV_PAIRS)
-    _logger.warning(
-        "No credentials found (%s). Requests will be unauthenticated.", names
-    )
-    return "", ""
-
-
 async def init_microgrid_data(
     *,
     microgrid_config_files: str | Path | list[str | Path] | None = None,
@@ -92,17 +68,28 @@ async def init_microgrid_data(
 
     Returns:
         MicrogridData instance.
+
+    Raises:
+        ValueError: If required environment variables are not set.
     """
     if dotenv_path is not None:
         _load_dotenv_files(dotenv_path)
 
     service_address = os.environ["REPORTING_API_URL"]
-    api_key, api_secret = _credentials()
+    reporting_key, reporting_secret = resolve_credentials(os.environ, "REPORTING_API")
+    assets_key, assets_secret = resolve_credentials(os.environ, "ASSETS_API")
+
+    if not reporting_key or not reporting_secret:
+        raise ValueError(
+            "Reporting API credentials not configured. "
+            "Set FREQUENZ_API_KEY/FREQUENZ_API_SECRET or "
+            "REPORTING_API_KEY/REPORTING_API_SECRET."
+        )
 
     assets_client = AssetsApiClient(
         os.environ["ASSETS_API_URL"],
-        auth_key=api_key or None,
-        sign_secret=api_secret or None,
+        auth_key=assets_key,
+        sign_secret=assets_secret,
     )
     try:
         mcfg = await load_configs(
@@ -114,8 +101,8 @@ async def init_microgrid_data(
 
     return MicrogridData(
         server_url=service_address,
-        auth_key=api_key,
-        sign_secret=api_secret,
+        auth_key=reporting_key,
+        sign_secret=reporting_secret,
         microgrid_configs=mcfg,
     )
 

@@ -29,6 +29,7 @@ from numpy.typing import NDArray
 from pandas import Series
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 
+from frequenz.lib.notebooks._credentials import resolve_credentials
 from frequenz.lib.notebooks.solar.maintenance.config import SolarMaintenanceConfig
 from frequenz.lib.notebooks.solar.maintenance.data_fetch import (
     ReportingRetrievalConfig,
@@ -174,12 +175,12 @@ async def run_workflow(user_config_changes: dict[str, Any]) -> SolarAnalysisData
     config, all_client_site_info = _load_and_validate_config(user_config_changes)
 
     load_dotenv(override=False)
-    api_key = os.getenv("API_KEY")
-    api_secret = os.getenv("API_SECRET")
+    api_key, api_secret = resolve_credentials(os.environ, "REPORTING_API")
     if api_key is None or api_secret is None:
         raise ValueError(
             "No API key or secret found. "
-            "Please set the API_KEY and API_SECRET in the .env file."
+            "Please set FREQUENZ_API_KEY/FREQUENZ_API_SECRET or "
+            "REPORTING_API_KEY/REPORTING_API_SECRET in the .env file."
         )
 
     tm = TranslationManager(lang=config.language)
