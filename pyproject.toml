@@ -5,7 +5,7 @@
 requires = [
   "setuptools == 84.0.0",
   "setuptools_scm[toml] == 10.2.1",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -72,8 +72,8 @@ dev-mkdocs = [
   "mkdocs-macros-plugin == 1.5.0",
   "mkdocs-material == 9.7.7",
   "mkdocstrings[python] == 1.0.6",
-  "mkdocstrings-python == 2.0.7",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "mkdocstrings-python == 2.0.5",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 dev-mypy = [
   "mypy == 2.3.1",
@@ -84,8 +84,8 @@ dev-mypy = [
   "frequenz-lib-notebooks[dev-mkdocs,dev-noxfile,dev-pytest]",
 ]
 dev-noxfile = [
-  "nox == 2026.8.17",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "nox == 2026.7.11",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 dev-pylint = [
   # dev-pytest already defines a dependency to pylint because of the examples
@@ -94,8 +94,8 @@ dev-pylint = [
 ]
 dev-pytest = [
   "pytest == 9.1.1",
-  "pylint == 4.0.7",       # We need this to check for the examples
-  "frequenz-repo-config[extra-lint-examples] == 0.18.0",
+  "pylint == 4.0.6",       # We need this to check for the examples
+  "frequenz-repo-config[extra-lint-examples] == 0.19.0",
   "pytest-mock == 3.15.1",
   "pytest-asyncio == 1.4.0",
   "async-solipsism == 0.9",
