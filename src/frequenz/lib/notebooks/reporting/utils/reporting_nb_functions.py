@@ -585,7 +585,7 @@ def aggregate_metrics(
     resolution: timedelta,
     *,
     tz_name: str = "Europe/Berlin",
-    price_column: str | None = None,
+    price_column: str | None = "day_ahead_price",
 ) -> dict[str, float | None | str]:
     """Aggregate key site-level energy and performance metrics from time-series data.
 
@@ -760,7 +760,7 @@ def aggregate_metrics(
                 peak_date = ts.tz_convert(tz_name).strftime("%d.%m.%Y")
 
     results["peak_date"] = peak_date
-    if price_column is None:
+    if price_column is None or price_column not in energy_report_df.columns:
         results["grid_import_cost_sum"] = 0.0
         results["grid_feed_in_revenue_sum"] = 0.0
         return results
