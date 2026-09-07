@@ -209,6 +209,34 @@ def test_plot_time_series_battery_soc_and_usecase_without_secondary_usecase_axis
     assert buttons[1].args[1]["yaxis2"]["title"]["text"] == "SOC [%]"
 
 
+def test_plot_time_series_battery_soc_and_usecase_skips_missing_day_ahead_axis() -> (
+    None
+):
+    """A missing day-ahead price column should not block the usecase plot."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-09 06:30:00", "2026-01-09 07:00:00"]),
+            "mid_consumption": [35.0, 21.0],
+            "grid_consumption": [30.0, 25.0],
+            "battery_power_flow": [5.0, -4.0],
+            "pv": [12.0, 10.0],
+            "soc": [42.0, 53.0],
+        }
+    )
+
+    fig = plot_time_series_battery_soc_and_usecase(
+        df,
+        time_col="timestamp",
+        secondary_y_cols=["day_ahead_price"],
+        secondary_y_title="EUR/MWh",
+        enable_resampler=False,
+    )
+
+    trace_names = [trace.name for trace in fig.data if getattr(trace, "name", None)]
+    assert "Day Ahead Preis" not in trace_names
+    assert fig.layout.updatemenus[0].buttons[0].args[1]["yaxis2"]["visible"] is False
+
+
 def test_plot_time_series_battery_soc_and_usecase_without_battery_columns() -> None:
     """A non-battery dataframe should still produce the usecase plot."""
     df = pd.DataFrame(
