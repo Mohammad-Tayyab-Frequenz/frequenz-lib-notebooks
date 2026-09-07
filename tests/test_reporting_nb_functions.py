@@ -535,6 +535,27 @@ def test_aggregate_metrics_computes_energy_peak_date_and_pricing() -> None:
     }
 
 
+def test_aggregate_metrics_skips_pricing_when_price_column_is_missing() -> None:
+    """Missing day-ahead prices should not block non-price metrics."""
+    energy_report_df = pd.DataFrame(
+        {
+            "grid_feed_in": [2.0],
+            "grid_consumption": [3.0],
+            "mid_consumption": [4.0],
+        }
+    )
+
+    result = aggregate_metrics(
+        energy_report_df,
+        resolution=timedelta(hours=1),
+        price_column="day_ahead_price",
+    )
+
+    assert result["grid_consumption_sum"] == 3.0
+    assert result["grid_import_cost_sum"] == 0.0
+    assert result["grid_feed_in_revenue_sum"] == 0.0
+
+
 def test_aggregate_metrics_adds_battery_flow_splits() -> None:
     """Battery charge/discharge should be split by production, grid, and load."""
     energy_report_df = pd.DataFrame(

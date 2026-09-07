@@ -21,3 +21,5 @@
 
 
 ## Bug Fixes
+
+- Day-ahead price data is now optional in asset optimization reporting. If prices cannot be fetched or the `day_ahead_price` column is absent, reporting metrics and battery-usecase plots continue without the price-related cost, revenue, or secondary-axis traces.

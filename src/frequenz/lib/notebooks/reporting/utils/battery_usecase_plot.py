@@ -185,6 +185,10 @@ def prepare_battery_usecase_plot(
     dotted_cols = _rename(dotted_cols, _DISPLAY_LABELS)
     plot_order = _rename(plot_order, _DISPLAY_LABELS)
     secondary_y_cols = _rename(secondary_y_cols, _DISPLAY_LABELS)
+    if secondary_y_cols is not None and _DISPLAY_LABELS["day_ahead_price"] not in df:
+        secondary_y_cols = [
+            col for col in secondary_y_cols if col != _DISPLAY_LABELS["day_ahead_price"]
+        ]
 
     # Build color map with defaults
     colors = dict(color_dict or {})

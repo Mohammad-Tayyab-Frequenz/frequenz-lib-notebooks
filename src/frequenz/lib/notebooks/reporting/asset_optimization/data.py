@@ -127,7 +127,7 @@ def merge_day_ahead_prices(
 
     Returns:
         A copy of ``df`` with a ``day_ahead_price`` column aligned to the dataframe
-        index.
+        index. If prices cannot be fetched, returns a copy of ``df`` unchanged.
     """
     if df.empty:
         return df.copy()
@@ -139,14 +139,18 @@ def merge_day_ahead_prices(
         resolution = pd.Timestamp(df.index[1]) - pd.Timestamp(df.index[0])
         end = (pd.Timestamp(df.index.max()) + resolution).to_pydatetime()
 
-    da_prices = fetch_day_ahead_prices(
-        entsoe_key=dayahead_api_key,
-        start=start,
-        end=end,
-        country_code=dayahead_country_code,
-    )
-
     merged = df.copy()
+    try:
+        da_prices = fetch_day_ahead_prices(
+            entsoe_key=dayahead_api_key,
+            start=start,
+            end=end,
+            country_code=dayahead_country_code,
+        )
+    except Exception as err:  # pylint: disable=broad-exception-caught
+        _logger.warning("Skipping day-ahead price integration: %s", err)
+        return merged
+
     merged["day_ahead_price"] = _align_series_to_index(merged.index, da_prices)
     return merged
 
