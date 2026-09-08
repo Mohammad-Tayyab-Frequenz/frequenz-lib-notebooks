@@ -4,7 +4,9 @@
 """Fetch component type power data from the reporting service."""
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import Protocol, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -13,6 +15,27 @@ from frequenz.client.reporting import ReportingApiClient
 from frequenz.gridpool.config import MicrogridConfig
 
 _logger = logging.getLogger(__name__)
+
+_MicrogridConfigMapping: TypeAlias = (
+    Mapping[int, MicrogridConfig] | Mapping[str, MicrogridConfig]
+)
+
+
+class _MicrogridConfigsContainer(Protocol):
+    """A configuration document containing microgrids."""
+
+    @property
+    def microgrids(self) -> Mapping[int, MicrogridConfig]:
+        """Return microgrid configurations by ID."""
+        raise NotImplementedError
+
+
+def _normalize_microgrid_configs(
+    configs: _MicrogridConfigMapping | _MicrogridConfigsContainer,
+) -> dict[int, MicrogridConfig]:
+    """Normalize supported gridpool configuration formats."""
+    raw_configs = configs if isinstance(configs, Mapping) else configs.microgrids
+    return {int(microgrid_id): config for microgrid_id, config in raw_configs.items()}
 
 
 class MicrogridData:
@@ -23,7 +46,9 @@ class MicrogridData:
         server_url: str,
         auth_key: str,
         sign_secret: str,
-        microgrid_configs: dict[int, MicrogridConfig] | None = None,
+        microgrid_configs: (
+            _MicrogridConfigMapping | _MicrogridConfigsContainer | None
+        ) = None,
     ) -> None:
         """Initialize microgrid data.
 
@@ -31,9 +56,14 @@ class MicrogridData:
             server_url: URL of the reporting service.
             auth_key: Authentication key to the service.
             sign_secret: Secret for signing requests.
-            microgrid_configs: MicrogridConfig dict mapping microgrid IDs to MicrogridConfigs.
+            microgrid_configs: A mapping of microgrid IDs to configurations, or a
+                gridpool configuration document containing that mapping.
         """
-        self._microgrid_configs = microgrid_configs
+        self._microgrid_configs = (
+            None
+            if microgrid_configs is None
+            else _normalize_microgrid_configs(microgrid_configs)
+        )
         self._client = ReportingApiClient(
             server_url=server_url, auth_key=auth_key, sign_secret=sign_secret
         )
@@ -58,7 +88,7 @@ class MicrogridData:
     async def metric_data(  # pylint: disable=too-many-arguments
         self,
         *,
-        microgrid_id: int,
+        microgrid_id: int | str,
         start: datetime,
         end: datetime,
         component_types: tuple[str, ...] = ("grid", "pv", "wind", "battery"),
@@ -70,7 +100,8 @@ class MicrogridData:
         """Power data for component types of a microgrid.
 
         Args:
-            microgrid_id: Microgrid ID.
+            microgrid_id: Microgrid ID. Numeric strings are accepted for notebook
+                compatibility.
             start: Start timestamp.
             end: End timestamp.
             component_types: List of component types to be aggregated.
@@ -88,6 +119,7 @@ class MicrogridData:
         """
         if self._microgrid_configs is None:
             raise ValueError("Microgrid configurations are not loaded.")
+        microgrid_id = int(microgrid_id)
         mcfg = self._microgrid_configs[microgrid_id]
 
         formulas = {
@@ -194,7 +226,7 @@ class MicrogridData:
     async def ac_active_power(  # pylint: disable=too-many-arguments
         self,
         *,
-        microgrid_id: int,
+        microgrid_id: int | str,
         start: datetime,
         end: datetime,
         component_types: tuple[str, ...] = ("grid", "pv", "wind", "battery"),
@@ -230,7 +262,7 @@ class MicrogridData:
     async def soc(  # pylint: disable=too-many-arguments
         self,
         *,
-        microgrid_id: int,
+        microgrid_id: int | str,
         start: datetime,
         end: datetime,
         resampling_period: timedelta = timedelta(seconds=10),

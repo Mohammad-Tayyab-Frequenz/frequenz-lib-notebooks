@@ -5,38 +5,20 @@
 
 import logging
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol, cast
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from frequenz.client.assets import AssetsApiClient
 
-from frequenz.data.microgrid import MicrogridConfig, MicrogridData, load_configs
+from frequenz.data.microgrid import MicrogridData, load_configs
 from frequenz.lib.notebooks._credentials import resolve_credentials
 from frequenz.lib.notebooks.dayahead import fetch_day_ahead_prices
 
 _logger = logging.getLogger(__name__)
-
-
-class _MicrogridConfigsContainer(Protocol):
-    """Object exposing microgrid configurations by ID."""
-
-    microgrids: Mapping[int | str, MicrogridConfig]
-
-
-def _normalize_microgrid_configs(
-    configs: object,
-) -> dict[int, MicrogridConfig]:
-    """Normalize gridpool configuration containers to integer-keyed mappings."""
-    if isinstance(configs, Mapping):
-        raw_configs = cast(Mapping[int | str, MicrogridConfig], configs)
-    else:
-        raw_configs = cast(_MicrogridConfigsContainer, configs).microgrids
-    return {int(microgrid_id): config for microgrid_id, config in raw_configs.items()}
 
 
 def _align_series_to_index(index: pd.Index, series: pd.Series) -> pd.Series:
@@ -108,15 +90,14 @@ async def init_microgrid_data(
         auth_key=assets_key,
         sign_secret=assets_secret,
     )
-    mcfg: dict[int, MicrogridConfig] = {}
     try:
-        assets_config = await load_configs(
+        mcfg = await load_configs(
             default_files=microgrid_config_files,
             assets_client=assets_client,
         )
-        mcfg = _normalize_microgrid_configs(assets_config)
     except RuntimeError:
         _logger.warning("Could not run async formula loading in current context. ")
+        mcfg = None
 
     return MicrogridData(
         server_url=service_address,
