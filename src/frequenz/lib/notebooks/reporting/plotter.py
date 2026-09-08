@@ -23,7 +23,12 @@ from frequenz.lib.notebooks.reporting.utils.colors import (
     LINE_DASH_MAP,
     generate_shades,
 )
-from frequenz.lib.notebooks.reporting.utils.helpers import build_color_map, long_to_wide
+from frequenz.lib.notebooks.reporting.utils.helpers import (
+    SummaryPeriod,
+    build_color_map,
+    long_to_wide,
+    prepare_summary_data,
+)
 
 
 def _with_plotly_resampler(
@@ -54,6 +59,121 @@ def _with_plotly_resampler(
             show_mean_aggregation_size=False,
         ),
     )
+
+
+def summary_plot(
+    df: pd.DataFrame,
+    period: SummaryPeriod = "monthly",
+) -> tuple[go.Figure, pd.DataFrame]:
+    """Plot aggregated grid energy and production/battery energy.
+
+    The input DataFrame must be indexed by timestamps and contain power values
+    in kW. Values are converted to MWh using the sampling period inferred from
+    the first two timestamps, then summed by the selected period.
+
+    Standard reporting metric columns are mapped to display labels for plotting.
+    Grid, consumption, production, and battery energy are plotted as separate
+    stacked bar groups.
+
+    Args:
+        df: Input time-series DataFrame with a ``DatetimeIndex`` or a
+            ``timestamp`` column.
+        period: Aggregation period: ``daily``, ``weekly``, ``monthly``, or
+            ``yearly``.
+
+    Returns:
+        A tuple containing the Plotly summary bar chart and the
+            aggregated DataFrame used to build it.
+    """
+    data = prepare_summary_data(df, period=period)
+    x_labels = pd.to_datetime(data.summary.index).strftime("%d-%m-%Y")
+    color_map = build_color_map(
+        [*data.positive.columns.to_list(), *data.negative.columns.to_list()]
+    )
+    summary_bar_groups = (
+        ("grid", data.positive, ("Netzbezug",), None),
+        ("grid", data.negative, ("Netz Einspeisung",), 0.75),
+        ("consumption", data.positive, ("MID Gesamtverbrauch",), None),
+        ("battery", data.positive, ("Batterie Beladung",), None),
+        ("battery", data.negative, ("Batterie Entladung",), 0.75),
+        (
+            "production",
+            data.negative,
+            (
+                "PV-Erzeugung",
+                "BHKW-Erzeugung",
+                "Wind-Erzeugung",
+            ),
+            0.75,
+        ),
+    )
+    color_aliases = {
+        "MID Gesamtverbrauch": "summary_consumption",
+        "Netz Einspeisung": "Netzbezug",
+        "Batterie Beladung": "Batterie Entladung",
+    }
+    summary_colors = {
+        "summary_consumption": "rgba(121, 85, 72, 1)",
+    }
+
+    def _add_summary_bars(
+        offsetgroup: str,
+        frame: pd.DataFrame,
+        columns: tuple[str, ...],
+        opacity: float | None,
+    ) -> None:
+        """Add summary bars for columns present in an aggregate frame."""
+        for column in columns:
+            if column not in frame.columns:
+                continue
+            color_column = color_aliases.get(column, column)
+            fig.add_trace(
+                go.Bar(
+                    x=x_labels,
+                    y=frame[column],
+                    name=column,
+                    marker_color=summary_colors.get(
+                        color_column, COLOR_DICT.get(color_column, color_map[column])
+                    ),
+                    opacity=opacity,
+                    text=frame[column].round(3),
+                    textposition="outside",
+                    offsetgroup=offsetgroup,
+                )
+            )
+
+    fig = go.Figure()
+    for offsetgroup, frame, columns, opacity in summary_bar_groups:
+        _add_summary_bars(offsetgroup, frame, columns, opacity)
+    period_title = period.capitalize()
+    fig.update_layout(
+        title={
+            "text": f"{period_title} Energy",
+            "x": 0.1,
+            "xanchor": "left",
+            "y": 0.98,
+            "yanchor": "top",
+            "pad": {"t": 0},
+        },
+        height=700,
+        width=900,
+        margin={"t": 60, "r": 40, "autoexpand": False},
+        barmode="relative",
+        legend={
+            "orientation": "h",
+            "x": 0,
+            "xanchor": "left",
+            "y": 1.05,
+            "yanchor": "top",
+            "font": {"size": 11},
+            **({"maxheight": 70} if _legend_supports_property("maxheight") else {}),
+        },
+        hovermode="x unified",
+        template="plotly_white",
+        xaxis={"title": "Timestamp", "tickangle": 45, "automargin": True},
+        yaxis={"title": "Energy (MWh)", "domain": [0, 0.95]},
+    )
+    return fig, data.summary
 
 
 def _coerce_numeric_series(series: pd.Series) -> pd.Series:

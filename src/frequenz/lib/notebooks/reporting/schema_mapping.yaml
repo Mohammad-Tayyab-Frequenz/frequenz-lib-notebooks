@@ -129,10 +129,19 @@ columns:
     raw: "battery_charge"
     display:
       en: "Battery Charge"
-      de: "Batterie Ladeleistung"
+      de: "Batterie Beladung"
     description:
-      en: "Energy output from the battery (discharging)."
-      de: "Energieabgabe der Batterie (Entladung)."
+      en: "Energy charged into the battery."
+      de: "Energie, die in die Batterie geladen wird."
+
+  battery_discharge:
+    raw: "battery_discharge"
+    display:
+      en: "Battery Discharge"
+      de: "Batterie Entladung"
+    description:
+      en: "Energy discharged from the battery."
+      de: "Energie, die aus der Batterie entladen wird."
 
   chp_asset_production:
     raw: "chp_asset_production"

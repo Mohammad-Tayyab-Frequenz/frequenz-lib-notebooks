@@ -18,7 +18,7 @@
 - Added interactive Plotly plots to the solar maintenance workflow, including per-subplot legends, unified hover boxes, compact axis tick labels, and full date values in hover labels.
 - Added dynamic resampling to `plot_time_series_battery_soc_and_usecase()` so the initial figure payload is downsampled and zoom interactions resample from the high-frequency data without adding aggregation-size suffixes to legend labels.
 - Added shared credential resolution for Frequenz APIs. Generic credentials are used by default, while a complete API-specific credential pair overrides them for that service.
-
+- Added `plot_monthly()` to create grouped monthly energy bar charts from timestamp-indexed power data, including MWh aggregation and German labels for grid, battery, consumption, PV, CHP, wind, and unknown production series.
 
 ## Bug Fixes
 
