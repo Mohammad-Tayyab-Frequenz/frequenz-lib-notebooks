@@ -2,7 +2,6 @@
 
 ## Summary
 
-<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
@@ -14,4 +13,5 @@
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
+- Fixed `MicrogridData` accepting gridpool configuration containers as well as
+  direct configuration mappings.
