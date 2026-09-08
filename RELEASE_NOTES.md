@@ -2,28 +2,16 @@
 
 ## Summary
 
-- The solar maintenance workflow now renders its plots with Plotly instead of Matplotlib, providing interactive plots.
-- The combined battery SOC and usecase reporting plot now uses Plotly Resampler to keep large time-series plots responsive while still loading detailed data when users zoom in.
-- Reporting and Assets API credentials are now resolved from `FREQUENZ_API_KEY` and
-  `FREQUENZ_API_SECRET`, with API-specific override pairs for individual services.
-- `frequenz-gridpool` 0.7.x is now supported by the microgrid configuration
-  helpers and reporting workflows.
+<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
-- Solar maintenance plots are now Plotly figures. Code that directly accessed Matplotlib figure, axes, legend, colormap, or PNG-specific APIs from the solar maintenance plotting internals may need to be updated to use the Plotly-based wrappers or Plotly figure APIs.
-- Plotly Resampler is now a runtime dependency. `plot_time_series_battery_soc_and_usecase()` returns a resampler-backed Plotly figure by default; pass `enable_resampler=False` to keep the previous plain `go.Figure` behavior.
-- Replace legacy `API_KEY`/`API_SECRET` or `API_AUTH_KEY`/`API_SIGN_SECRET` variables with `FREQUENZ_API_KEY`/`FREQUENZ_API_SECRET` for the reporting, asset optimization, and solar maintenance workflows. Use `REPORTING_API_KEY`/`REPORTING_API_SECRET` or `ASSETS_API_KEY`/`ASSETS_API_SECRET` only when a service needs credentials that differ from the generic Frequenz API credentials.
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-- Added interactive Plotly plots to the solar maintenance workflow, including per-subplot legends, unified hover boxes, compact axis tick labels, and full date values in hover labels.
-- Added dynamic resampling to `plot_time_series_battery_soc_and_usecase()` so the initial figure payload is downsampled and zoom interactions resample from the high-frequency data without adding aggregation-size suffixes to legend labels.
-- Added shared credential resolution for Frequenz APIs. Generic credentials are used by default, while a complete API-specific credential pair overrides them for that service.
-- Added `plot_monthly()` to create grouped monthly energy bar charts from timestamp-indexed power data, including MWh aggregation and German labels for grid, battery, consumption, PV, CHP, wind, and unknown production series.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
 
-- Day-ahead price data is now optional in asset optimization reporting. If prices cannot be fetched or the `day_ahead_price` column is absent, reporting metrics and battery-usecase plots continue without the price-related cost, revenue, or secondary-axis traces.
-- Updated microgrid configuration imports, loading, and ID handling to remain
-  compatible with newer `frequenz-gridpool` releases.
+<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
