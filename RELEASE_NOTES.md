@@ -6,6 +6,8 @@
 - The combined battery SOC and usecase reporting plot now uses Plotly Resampler to keep large time-series plots responsive while still loading detailed data when users zoom in.
 - Reporting and Assets API credentials are now resolved from `FREQUENZ_API_KEY` and
   `FREQUENZ_API_SECRET`, with API-specific override pairs for individual services.
+- `frequenz-gridpool` 0.7.x is now supported by the microgrid configuration
+  helpers and reporting workflows.
 
 ## Upgrading
 
@@ -23,3 +25,5 @@
 ## Bug Fixes
 
 - Day-ahead price data is now optional in asset optimization reporting. If prices cannot be fetched or the `day_ahead_price` column is absent, reporting metrics and battery-usecase plots continue without the price-related cost, revenue, or secondary-axis traces.
+- Updated microgrid configuration imports, loading, and ID handling to remain
+  compatible with newer `frequenz-gridpool` releases.
