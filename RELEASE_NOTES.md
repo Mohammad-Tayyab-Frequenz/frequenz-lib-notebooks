@@ -14,6 +14,9 @@
   To keep the previous behaviour, pass `grid_data_source="power"`.
 
 ## New Features
+- Energy reports now use directional active-energy readings for grid data by
+  default, while all other component data remains active power. Set
+  `grid_data_source="power"` to use signed grid power instead.
 
 
 ## Bug Fixes
