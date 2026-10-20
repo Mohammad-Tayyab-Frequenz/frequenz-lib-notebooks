@@ -25,3 +25,4 @@ instantaneous power spikes should consume `ac_active_energy()` data directly.
   values fetched directly for configured battery components.
 
 ## Bug Fixes
+- Update the color schema for battery charging and discharging plot.
