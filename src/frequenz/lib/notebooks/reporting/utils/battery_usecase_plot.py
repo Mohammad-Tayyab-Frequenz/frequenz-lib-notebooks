@@ -81,14 +81,14 @@ def _resolve_battery_usecase_color(color_dict: dict[str, str], name: str) -> str
     if name == _DISPLAY_LABELS["battery_discharge"]:
         return (
             color_dict.get(name)
-            or color_dict.get("Battery Charge")
-            or COLOR_DICT["Battery Charge"]
+            or color_dict.get("Battery Discharge")
+            or COLOR_DICT["Battery Discharge"]
         )
     if name == _DISPLAY_LABELS["battery_charge"]:
         return (
             color_dict.get(name)
-            or color_dict.get("Battery Discharge")
-            or COLOR_DICT["Battery Discharge"]
+            or color_dict.get("Battery Charge")
+            or COLOR_DICT["Battery Charge"]
         )
     return color_dict.get(name) or COLOR_DICT.get(name) or COLOR_DICT["PV"]
 
@@ -199,11 +199,9 @@ def prepare_battery_usecase_plot(
     colors = dict(color_dict or {})
     colors.setdefault(_DISPLAY_LABELS["grid_consumption"], COLOR_DICT["Netzbezug"])
     colors.setdefault(
-        _DISPLAY_LABELS["battery_discharge"], COLOR_DICT["Battery Charge"]
+        _DISPLAY_LABELS["battery_discharge"], COLOR_DICT["Battery Discharge"]
     )
-    colors.setdefault(
-        _DISPLAY_LABELS["battery_charge"], COLOR_DICT["Battery Discharge"]
-    )
+    colors.setdefault(_DISPLAY_LABELS["battery_charge"], COLOR_DICT["Battery Charge"])
     colors.setdefault(
         _DISPLAY_LABELS["day_ahead_price"],
         COLOR_DICT["day_ahead_price"],
