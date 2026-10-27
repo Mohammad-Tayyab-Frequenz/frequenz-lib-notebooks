@@ -495,6 +495,8 @@ def add_energy_flows(
         A DataFrame including additional columns:
             - "production_excess": Production exceeding consumption.
             - "grid_feed_in": Portion of excess fed into the grid.
+            - "grid": Grid import with feed-in values removed when a measured
+              grid column is provided.
             - "production_self_use": Self-consumed portion of production.
             - "production_to_battery": Production energy sent to the battery.
             - "grid_to_battery": Grid energy sent to the battery.
@@ -575,6 +577,13 @@ def add_energy_flows(
         battery=battery_power_series,
         grid=grid_power_series if resolved_grid_cols else None,
     )
+
+    # The measured grid series carries both directions: imports are positive and
+    # feed-in is negative.  Now that feed-in has been split into its own column,
+    # retain only imports in the grid column (renamed to ``grid_consumption`` by
+    # the reporting pipeline later on).
+    if resolved_grid_cols:
+        df_flows["grid"] = grid_power_series.clip(lower=0)
 
     # If no production columns exist, set self-consumption metrics to zero
     if asset_production_cols:
