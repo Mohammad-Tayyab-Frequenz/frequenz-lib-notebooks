@@ -84,6 +84,15 @@ def test_add_energy_flows_adds_battery_flow_columns() -> None:
     )
 
     assert_series_equal(
+        result["grid"],
+        pd.Series([0.0, 7.0, 1.0, 0.0], name="grid"),
+    )
+    assert_series_equal(
+        result["grid_feed_in"],
+        pd.Series([3.0, 0.0, 0.0, 7.0], name="grid_feed_in"),
+    )
+
+    assert_series_equal(
         result["production_to_battery"],
         pd.Series([3.0, 0.0, 0.0, 0.0], name="production_to_battery"),
     )
