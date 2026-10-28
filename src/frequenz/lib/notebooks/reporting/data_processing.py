@@ -165,7 +165,7 @@ def create_energy_report_df(
             grid column. Energy mode expects separate grid_energy_consumed and
             grid_energy_delivered columns.
         component_types: Component types to include in the Energy Report DataFrame
-                (e.g., ``battery``, ``pv``).
+                (e.g., battery, pv).
         mcfg: Configuration object used to resolve component IDs.
         mapper: Column Mapper object to standardize the column names.
         tz_name: Target timezone name for timestamp conversion (default: "Europe/Berlin").
@@ -191,7 +191,7 @@ def create_energy_report_df(
         The Energy Report DataFrame with standardized and selected columns.
 
     Notes:
-        Component IDs are renamed to labeled names via ``label_component_columns()``.
+        Component IDs are renamed to labeled names via label_component_columns().
     """
     energy_report_df = df.copy()
 

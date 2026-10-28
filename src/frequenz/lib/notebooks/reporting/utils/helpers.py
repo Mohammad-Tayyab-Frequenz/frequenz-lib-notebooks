@@ -277,20 +277,20 @@ def convert_timezone(
     """Convert a datetime Series to a target timezone.
 
     If the Series contains timezone-naive datetimes, they are first localized to
-    ``assume_tz`` before converting to ``target_tz``.
+    assume_tz before converting to target_tz.
 
     Args:
         ts: Input Series containing the datetime values.
         target_tz: Timezone name to convert the Series to.
-            Defaults to ``"Europe/Berlin"``.
+            Defaults to "Europe/Berlin".
         assume_tz: Timezone to assume for naive datetimes.
-            Defaults to ``"UTC"``.
+            Defaults to "UTC".
 
     Returns:
         pd.Series: The timestamp Series converted to the requested timezone.
 
     Raises:
-        ValueError: If ``ts`` is not a pandas Series.
+        ValueError: If ts is not a pandas Series.
     """
     if not isinstance(ts, pd.Series):
         raise ValueError("Input must be a pandas Series")
@@ -316,14 +316,14 @@ def label_component_columns(
 ) -> tuple[pd.DataFrame, list[str]]:
     """Rename numeric single-component columns to labeled names.
 
-    Numeric string column names like ``"14"`` are converted to
-    ``"Battery #14"``, ``"PV #14"``, ``"CHP #14"`` or ``"EV #14"`` based on
-    the component IDs provided by ``mcfg.component_type_ids(...)``
+    Numeric string column names like "14" are converted to
+    "Battery #14", "PV #14", "CHP #14" or "EV #14" based on
+    the component IDs provided by mcfg.component_type_ids(...)
 
     Args:
         df: Input DataFrame with numeric string column names.
-        mcfg: Configuration with ``_component_types_cfg`` mapping component types to a
-            ``meter`` iterable of numeric IDs.
+        mcfg: Configuration with _component_types_cfg mapping component types to a
+            meter iterable of numeric IDs.
         column_battery: Key name for battery component type.
         column_pv: Key name for PV component type.
         column_chp: Key name for CHP component type.
@@ -720,7 +720,7 @@ def normalize_date_for_reporting(
     If the input date is today (in the target timezone), this returns the
     current time in that timezone. If the date is in the future, a ValueError
     is raised to prevent selecting future dates. For past dates, midnight is
-    returned via ``set_date_to_midnight``.
+    returned via set_date_to_midnight.
 
     Args:
         input_date: Date or datetime object to evaluate.
@@ -894,17 +894,15 @@ def prepare_summary_data(
     """Aggregate power data into MWh totals for summary plotting.
 
     Args:
-        df: Input time-series DataFrame with a ``DatetimeIndex`` or a
-            ``timestamp`` column.
-        period: Aggregation period: ``daily``, ``weekly``, ``monthly``, or
-            ``yearly``.
+        df: Input time-series DataFrame with a DatetimeIndex or a timestamp column.
+        period: Aggregation period: daily, weekly, monthly, or yearly.
 
     Returns:
         The aggregated summary data split into positive and negative values.
 
     Raises:
-        TypeError: If ``df`` does not have a timestamp index or column.
-        ValueError: If fewer than two rows are provided or ``period`` is unknown.
+        TypeError: If df does not have a timestamp index or column.
+        ValueError: If fewer than two rows are provided or period is unknown.
     """
     source_input = df.copy()
     if not isinstance(source_input.index, pd.DatetimeIndex):

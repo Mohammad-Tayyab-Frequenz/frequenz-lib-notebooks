@@ -217,7 +217,7 @@ def production_self_share(production: pd.Series, consumption: pd.Series) -> pd.S
 
     Calculates the fraction of total production that is directly self-consumed.
     The denominator is the positive production portion, and values are masked
-    to ``NaN`` where production is zero or negative to avoid invalid divisions.
+    to NaN where production is zero or negative to avoid invalid divisions.
 
     Args:
         production: Production values using either power or energy units.
@@ -225,7 +225,7 @@ def production_self_share(production: pd.Series, consumption: pd.Series) -> pd.S
             unit as production.
     Returns:
         Series of self-consumption share values (typically between 0 and 1).
-        Returns ``NaN`` for timestamps where total production is zero or negative.
+        Returns NaN for timestamps where total production is zero or negative.
     """
     production_self_use = production_self_consumption(production, consumption)
     denom = asset_production(production).astype("float64")
@@ -356,8 +356,8 @@ def battery_power_flows(
             negative values discharge the battery.
 
     Returns:
-        A tuple containing ``production_to_battery``, ``grid_to_battery``,
-        ``battery_to_grid``, and ``battery_to_consumption`` series.
+        A tuple containing production_to_battery, grid_to_battery,
+        battery_to_grid, and battery_to_consumption series.
     """
     grid_consumption_series = grid_import.fillna(0.0).astype("float64")
     grid_feed_in_series = grid_export.fillna(0.0).astype("float64")

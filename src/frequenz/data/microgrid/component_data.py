@@ -287,7 +287,7 @@ class MicrogridData:
     ) -> pd.DataFrame | None:
         """Power data for component types of a microgrid.
 
-        Set ``from_energy`` to derive power from net AC active energy instead of
+        Set from_energy to derive power from net AC active energy instead of
         fetching the instantaneous power metric.
         """
         if from_energy:
