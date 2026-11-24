@@ -5,7 +5,7 @@
 requires = [
   "setuptools == 84.2.1",
   "setuptools_scm[toml] == 10.3.4",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -26,27 +26,27 @@ classifiers = [
 ]
 requires-python = ">= 3.11, < 4"
 dependencies = [
-  "typing-extensions >= 4.14.1, < 5",
+  "typing-extensions >= 4.16.0, < 5",
   "numpy >= 2.3.1, < 3",
-  "pandas >= 2.3.1, < 3",
-  "pyarrow >= 20.0.0, < 27.0.0",
-  "matplotlib >= 3.9.2, < 3.12.0",
-  "ipython == 9.17.1",
-  "pvlib >= 0.13.0, < 0.17.0",
-  "python-dotenv >= 0.21.0, < 1.3.0",
+  "pandas >= 2.3.1, < 4",
+  "pyarrow >= 26.0.1, < 27.0.0",
+  "matplotlib >= 3.11.2, < 3.12.0",
+  "ipython == 9.19.1",
+  "pvlib >= 0.16.1, < 0.17.0",
+  "python-dotenv >= 1.2.4, < 1.3.0",
   "toml >= 0.10.2, < 0.11.0",
   "marshmallow-dataclass>=8.7.1,<9",
-  "plotly >= 6.0.0, < 7.2.0",
-  "kaleido >= 0.2.1, < 1.6.0",
-  "frequenz-client-reporting >= 0.20.0, < 0.22.0",
-  "frequenz-client-weather >= 0.2.3, < 0.3.0",
+  "plotly >= 6.9.0, < 7.2.0",
+  "kaleido >= 1.5.2, < 1.6.0",
+  "frequenz-client-reporting >= 0.22.0, < 0.23.0",
+  "frequenz-client-weather >= 0.3.1, < 0.4.0",
   "frequenz-client-marketmetering >= 0.1.2, < 0.2.0",
-  "frequenz-gridpool >= 0.8.0, < 0.9.0",
-  "types-pyyaml >= 6.0.12.20250915, < 6.1.0",
-  "marshmallow >= 4.1.0, < 5",
-  "pyyaml >= 6.0.3, < 7.0.0",
+  "frequenz-gridpool >= 0.9.0, < 0.10.0",
+  "types-pyyaml >= 6.0.12.20261122, < 6.1.0",
+  "marshmallow >= 4.4.0, < 5",
+  "pyyaml >= 6.0.4, < 7.0.0",
   "entsoe-py >= 0.8.0, < 0.9.0",
-  "plotly-resampler >= 0.11.0, < 0.12.0",
+  "plotly-resampler >= 0.11.1, < 0.12.0",
 ]
 dynamic = ["version"]
 
@@ -60,33 +60,33 @@ dev-flake8 = [
   "flake8-datetimez == 26.8.1",
   "flake8-docstrings == 1.7.0",
   "flake8-pyproject == 1.2.4",  # For reading the flake8 config from pyproject.toml
-  "pydoclint == 0.9.1",
+  "pydoclint == 0.12.0",
   "pydocstyle == 6.3.0",
 ]
 dev-formatting = ["black == 26.10.1", "isort == 9.0.2"]
 dev-mkdocs = [
-  "Markdown == 3.11.2",
+  "Markdown == 3.11.3",
   "black == 26.10.1",
   "mike == 2.2.0",
   "mkdocs-gen-files == 0.6.1",
   "mkdocs-literate-nav == 0.6.3",
   "mkdocs-macros-plugin == 1.5.0",
-  "mkdocs-material == 9.8.0",
+  "mkdocs-material == 9.8.2",
   "mkdocstrings[python] == 1.0.8",
-  "mkdocstrings-python == 2.0.10",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "mkdocstrings-python == 2.0.11",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 dev-mypy = [
   "mypy == 2.4.1",
-  "pandas-stubs == 2.3.3.260113",
+  "pandas-stubs == 3.0.5.260914",
   "types-toml==0.10.8.20260518",
-  "types-Markdown == 3.11.2.20261029",
+  "types-Markdown == 3.11.3.20261122",
   # For checking the noxfile, docs/ script, and tests
   "frequenz-lib-notebooks[dev-mkdocs,dev-noxfile,dev-pytest]",
 ]
 dev-noxfile = [
   "nox == 2026.10.20",
-  "frequenz-repo-config[lib] == 0.18.0",
+  "frequenz-repo-config[lib] == 0.19.0",
 ]
 dev-pylint = [
   # dev-pytest already defines a dependency to pylint because of the examples
@@ -95,10 +95,10 @@ dev-pylint = [
 ]
 dev-pytest = [
   "pytest == 9.2.0",
-  "pylint == 4.1.3",       # We need this to check for the examples
-  "frequenz-repo-config[extra-lint-examples] == 0.18.0",
+  "pylint == 4.1.4",       # We need this to check for the examples
+  "frequenz-repo-config[extra-lint-examples] == 0.19.0",
   "pytest-mock == 3.17.0",
-  "pytest-asyncio == 1.4.1",
+  "pytest-asyncio == 1.5.0",
   "async-solipsism == 0.10",
 ]
 dev = [
