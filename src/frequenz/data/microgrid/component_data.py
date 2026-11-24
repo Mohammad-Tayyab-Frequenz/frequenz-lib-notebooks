@@ -112,6 +112,18 @@ class MicrogridData:
         return df / scale_by_unit[unit]
 
     @staticmethod
+    def _clamp_consumption(df: pd.DataFrame) -> pd.DataFrame:
+        """Clamp the aggregated consumption power at zero.
+
+        The consumption formula is derived from other measurements (e.g. grid
+        minus production and battery), so noise or meter mismatches can push it
+        below zero. Consumption is never negative.
+        """
+        if "consumption" in df.columns:
+            df["consumption"] = df["consumption"].clip(lower=0)
+        return df
+
+    @staticmethod
     def _add_split_pos_neg_cols(df: pd.DataFrame) -> pd.DataFrame:
         """Add positive and negative split columns for each column."""
         cols = df.columns
@@ -271,6 +283,10 @@ class MicrogridData:
 
         # Make string columns
         df.columns = [str(e) for e in df.columns]
+
+        # Cumulative energy readings must not be clamped, only power.
+        if metric == "AC_POWER_ACTIVE":
+            df = self._clamp_consumption(df)
 
         if splits:
             df = self._add_split_pos_neg_cols(df)
@@ -495,7 +511,8 @@ class MicrogridData:
                 int(negative_deltas.sum().sum()),
             )
             energy_delta = energy_delta.mask(negative_deltas)
-        return energy_delta * (timedelta(hours=1) / resampling_period)
+        power = energy_delta * (timedelta(hours=1) / resampling_period)
+        return MicrogridData._clamp_consumption(power)
 
     async def _component_metric_data(  # pylint: disable=too-many-arguments
         self,
