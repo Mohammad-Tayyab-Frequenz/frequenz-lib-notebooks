@@ -48,7 +48,7 @@ ensuring resilient operation even with partially populated datasets.
 """
 
 from datetime import datetime, timedelta
-from typing import Iterable, Literal, Union, cast
+from typing import Any, Iterable, Literal, Union, cast
 
 import pandas as pd
 
@@ -273,7 +273,7 @@ def assemble_component_analysis(
         ``"timestamp"`` column, an empty result is returned.
     """
     analyse_df = pd.DataFrame()
-    component_sum = 0
+    component_sum = 0.0
 
     # Normalize filters
     if "Alle" in component_filter or "All" in component_filter:
@@ -698,7 +698,7 @@ def aggregate_metrics(
         "battery_to_consumption": "battery_to_consumption_sum",
     }
 
-    results = {}
+    results: dict[str, Any] = {}
     zeros = pd.Series(0, index=energy_report_df.index)
 
     # Energy Sums Calculation (kWh)
@@ -754,7 +754,7 @@ def aggregate_metrics(
         peak_idx = grid_consumption_series.idxmax()
 
         if "timestamp" in energy_report_df.columns:
-            raw_ts = energy_report_df.loc[peak_idx, "timestamp"]
+            raw_ts = energy_report_df.at[peak_idx, "timestamp"]
 
             # Cast it to a type that pd.to_datetime accepts (str, float, or datetime)
             ts_input = cast(Union[str, float, datetime], raw_ts)

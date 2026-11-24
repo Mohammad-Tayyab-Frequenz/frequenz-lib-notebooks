@@ -92,7 +92,7 @@ class MicrogridOverviewDashboard:
             self._parse_number
         )
         idx_max = parsed_column.idxmax()
-        return cast(int, self.df.loc[idx_max, "Microgrid ID"])
+        return cast(int, self.df.at[idx_max, "Microgrid ID"])
 
     def _should_display_top_producer_badge(self) -> bool:
         """Determine if Top Producer badge should be shown.
