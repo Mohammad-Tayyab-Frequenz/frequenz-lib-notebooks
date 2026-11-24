@@ -166,8 +166,9 @@ class PlotlyAxis:
             color: Fill and boundary color.
             alpha: Fill opacity.
             label: Legend label for the filled band.
-            **_: Additional Matplotlib-style keyword arguments accepted for
-                compatibility and ignored.
+
+        Additional Matplotlib-style keyword arguments are accepted for
+        compatibility and ignored.
         """
         self.add_trace(
             go.Scatter(
@@ -197,8 +198,9 @@ class PlotlyAxis:
 
         Args:
             text: Annotation text.
-            **_: Additional Matplotlib-style annotation arguments accepted for
-                compatibility and ignored.
+
+        Additional Matplotlib-style annotation arguments are accepted for
+        compatibility and ignored.
         """
         self.figure.add_annotation(
             text=text,
@@ -346,11 +348,8 @@ class PlotlyAxis:
     def legend(self, *_: Any, **__: Any) -> PlotlyLegend:
         """Return a compatibility legend object.
 
-        Args:
-            *_: Positional Matplotlib-style legend arguments accepted for
-                compatibility and ignored.
-            **__: Keyword Matplotlib-style legend arguments accepted for
-                compatibility and ignored.
+        Matplotlib-style legend arguments are accepted for compatibility and
+        ignored.
 
         Returns:
             A ``PlotlyLegend`` object that accepts Matplotlib-style visibility
